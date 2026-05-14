@@ -19,6 +19,8 @@ Good fits include shipping changelogs, internal dev updates, weekly digests for 
 
 ## Quickstart
 
+> **Adopting this in a new repo?** Read [SETUP_NEW_REPO.md](./SETUP_NEW_REPO.md) for the full ritual — plan file, agent contract, workflow, secrets — as a single self-contained brief you can hand to a coding agent. The Quickstart below covers just the workflow piece.
+
 ```yaml
 # .github/workflows/dev-updates.yml
 name: Dev Updates
@@ -42,6 +44,25 @@ jobs:
         with:
           fetch-depth: 50
 
+      # Sanitize: strip CR/LF and surrounding whitespace from pasted-in
+      # tokens before they reach HTTP headers. Secrets pasted from a
+      # terminal often arrive with a trailing \r\n, which silently
+      # breaks the Authorization header on Resend / Slack / Telegram
+      # / Twitter. Keep this step - it bites real deployments often
+      # enough that it's part of the canonical Quickstart.
+      - name: Sanitize secrets
+        shell: bash
+        env:
+          RAW_OAUTH: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          RAW_SLACK: ${{ secrets.SLACK_WEBHOOK_URL }}
+        run: |
+          CLEAN_OAUTH="$(printf '%s' "$RAW_OAUTH" | tr -d '\r\n' | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+          CLEAN_SLACK="$(printf '%s' "$RAW_SLACK" | tr -d '\r\n' | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+          echo "::add-mask::$CLEAN_OAUTH"
+          echo "::add-mask::$CLEAN_SLACK"
+          echo "CLAUDE_CODE_OAUTH_TOKEN=$CLEAN_OAUTH" >> "$GITHUB_ENV"
+          echo "SLACK_WEBHOOK_URL=$CLEAN_SLACK" >> "$GITHUB_ENV"
+
       - uses: vinnycorp/dev-updates-action@v1
         with:
           cooldown: '24h'
@@ -52,9 +73,9 @@ jobs:
             - name: team-slack
               type: slack
               webhook_url_env: SLACK_WEBHOOK_URL
-        env:
-          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        # Env comes from the Sanitize step via $GITHUB_ENV. Do NOT add
+        # a step-level `env:` block here - it would override the
+        # cleaned values with the raw secrets.
 ```
 
 That's it. Push to `main` and a Slack message lands describing what changed.
@@ -85,22 +106,7 @@ Everything else is upstream-compatible. Existing telegram/discord/slack/twitter 
 
 Configure only the secrets for channels you actually use.
 
-> **Sharp edge:** secrets pasted from a terminal sometimes carry a trailing `\r\n`, which silently breaks HTTP `Authorization` headers. If you see 401s with otherwise-valid keys, sanitize before passing to the action:
->
-> ```yaml
-> - name: Sanitize secrets
->   shell: bash
->   env:
->     RAW_OAUTH: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
->     RAW_RESEND: ${{ secrets.RESEND_API_KEY }}
->   run: |
->     CLEAN_OAUTH="$(printf '%s' "$RAW_OAUTH" | tr -d '\r\n' | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
->     CLEAN_RESEND="$(printf '%s' "$RAW_RESEND" | tr -d '\r\n' | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
->     echo "::add-mask::$CLEAN_OAUTH"
->     echo "::add-mask::$CLEAN_RESEND"
->     echo "CLAUDE_CODE_OAUTH_TOKEN=$CLEAN_OAUTH" >> "$GITHUB_ENV"
->     echo "RESEND_API_KEY=$CLEAN_RESEND" >> "$GITHUB_ENV"
-> ```
+> **Sharp edge:** secrets pasted from a terminal sometimes carry a trailing `\r\n`, which silently breaks HTTP `Authorization` headers and surfaces as 401s with otherwise-valid keys. The **Sanitize secrets** step in the [Quickstart](#quickstart) workflow strips this — keep that step in your workflow. To sanitize different secrets, edit the `RAW_` env block and the corresponding `$GITHUB_ENV` exports.
 
 ## Channel reference
 
@@ -236,17 +242,18 @@ If you're sending to a non-Gmail-heavy audience, fork and re-tune `_markdown_to_
 
 ## Writing good `dev_rules`
 
-`dev_rules` is the heart of the customization. It's templated into a `TASK="..."` bash variable and passed to Claude Code, so:
+> **Sharp edge:** `dev_rules` is templated into a `TASK="..."` bash variable inside the action runner. Unescaped double quotes or backticks anywhere in your rules will break the bash assignment and the workflow fails before Claude Code runs. Use single quotes or rephrase. This bites every new adopter at least once — if your run errors out on parsing before any digest output, this is almost always the cause.
 
-1. **Never use unescaped double quotes or backticks in `dev_rules`.** They break the bash assignment. Use single quotes or rephrase.
-2. **Be specific about formatting.** Tell the model:
+`dev_rules` is the heart of the customization. To get a digest that reads in your team's voice:
+
+1. **Be specific about formatting.** Tell the model:
    - Bulleted vs. numbered lists
    - One-line vs. multi-line items
    - Whether to lead with file paths or business impact
    - Whether to include cross-reference IDs
-3. **Provide good/bad examples.** A short before/after pair pinned to the rules is the highest-leverage thing you can add.
-4. **Sub-grouping threshold.** Specify when the model should switch from a flat list to H3 sub-groupings (typical: more than 6 items per section).
-5. **Section ordering.** If certain topics should surface first (e.g. revenue-driving work for an executive audience), state that explicitly.
+2. **Provide good/bad examples.** A short before/after pair pinned to the rules is the highest-leverage thing you can add.
+3. **Sub-grouping threshold.** Specify when the model should switch from a flat list to H3 sub-groupings (typical: more than 6 items per section).
+4. **Section ordering.** If certain topics should surface first (e.g. revenue-driving work for an executive audience), state that explicitly.
 
 Example fragment that works well for non-technical readers:
 
