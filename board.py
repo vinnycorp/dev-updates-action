@@ -393,20 +393,19 @@ code{font-family:var(--f-mono);font-size:.86em;background:rgba(0,0,0,.05);paddin
 .toolbar{position:sticky;top:0;z-index:20;background:var(--paper);border-bottom:1px solid var(--border);padding:12px 24px;display:flex;gap:12px;align-items:center;flex-wrap:wrap}
 .toolbar input[type=search],.toolbar select{font-family:var(--f-sans);font-size:13px;padding:7px 11px;border:1px solid var(--border);border-radius:7px;background:var(--panel);color:var(--ink)}
 .toolbar input[type=search]{min-width:230px}
-.toggles{display:flex;gap:6px}
-.toggle{font-size:12px;padding:6px 12px;border:1px solid var(--border);border-radius:999px;background:var(--panel);cursor:pointer;user-select:none;color:var(--muted)}
-.toggle.on{background:var(--ink);color:#fff;border-color:var(--ink)}
-.toggle.t-Q.on{background:var(--navy);border-color:var(--navy)}
-.toggle.t-D.on{background:var(--gold);border-color:var(--gold)}
+.tabs{display:inline-flex;border:1px solid var(--border);border-radius:8px;overflow:hidden;background:var(--panel)}
+.tab{font-family:var(--f-sans);font-size:13px;font-weight:500;padding:8px 17px;border:none;border-right:1px solid var(--border);background:transparent;cursor:pointer;color:var(--muted)}
+.tab:last-child{border-right:none}
+.tab:hover{color:var(--ink);background:rgba(0,0,0,.025)}
+.tab.on{background:var(--navy);color:#fff}
 .spacer{flex:1}
 .count-live{font-size:12px;color:var(--muted);font-family:var(--f-mono)}
 
-/* sections */
-main{padding:24px;max-width:1700px;margin:0 auto}
-.section-head{display:flex;align-items:baseline;gap:12px;margin:30px 0 14px}
-.section-head:first-child{margin-top:6px}
-.section-head h2{font-family:var(--f-display);font-weight:400;font-size:24px;color:var(--ink);margin:0}
-.section-head .hint{font-size:12px;color:var(--muted)}
+/* views (tabbed - one visible at a time) */
+main{padding:20px 24px 44px;max-width:1700px;margin:0 auto}
+.view{display:none}
+.view.on{display:block}
+.view-hint{font-size:12px;color:var(--muted);margin:2px 0 16px}
 
 /* kanban */
 .board{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;align-items:start}
@@ -477,35 +476,39 @@ main{padding:24px;max-width:1700px;margin:0 auto}
 </header>
 
 <div class="toolbar">
-  <input type="search" id="q" placeholder="Search id, owner, text...">
-  <select id="owner"><option value="">All owners</option>%%OWNER_OPTS%%</select>
-  <div class="toggles">
-    <span class="toggle t-T on" data-t="T">Tasks</span>
-    <span class="toggle t-Q on" data-t="Q">Questions</span>
-    <span class="toggle t-D on" data-t="D">Decisions</span>
+  <div class="tabs">
+    <button class="tab on" data-t="T">Tasks</button>
+    <button class="tab" data-t="Q">Questions</button>
+    <button class="tab" data-t="D">Decisions</button>
   </div>
+  <input type="search" id="q" placeholder="Search...">
+  <select id="owner"><option value="">All owners</option>%%OWNER_OPTS%%</select>
   <div class="spacer"></div>
   <span class="count-live" id="live"></span>
 </div>
 
 <main>
-  <div class="section-head" data-sect="T"><h2>Tasks</h2><span class="hint">click a card to expand &middot; click a column header to collapse</span></div>
-  <div class="board" id="tasks">%%TASK_COLS%%</div>
-
-  <div class="section-head" data-sect="Q"><h2>Open questions</h2><span class="hint">awaiting an answer from someone</span></div>
-  <div class="board q" id="questions">%%Q_COLS%%</div>
-
-  <div class="section-head" data-sect="D"><h2>Decisions log</h2><span class="hint">append-only record, newest first</span></div>
-  <div class="decisions" id="decisions">%%DECISIONS%%</div>
+  <section class="view on" id="view-T">
+    <div class="view-hint">Click a card to expand &middot; click a column header to collapse the column.</div>
+    <div class="board" id="tasks">%%TASK_COLS%%</div>
+  </section>
+  <section class="view" id="view-Q">
+    <div class="view-hint">Open questions awaiting an answer from someone.</div>
+    <div class="board q" id="questions">%%Q_COLS%%</div>
+  </section>
+  <section class="view" id="view-D">
+    <div class="view-hint">Append-only decision record, newest first.</div>
+    <div class="decisions" id="decisions">%%DECISIONS%%</div>
+  </section>
 </main>
 
 <script>
 (function(){
   var q=document.getElementById('q'),owner=document.getElementById('owner'),live=document.getElementById('live');
-  var types={T:true,Q:true,D:true};
-  var cards=Array.prototype.slice.call(document.querySelectorAll('.card,.decision'));
+  var active='T';
+  var views={T:document.getElementById('view-T'),Q:document.getElementById('view-Q'),D:document.getElementById('view-D')};
 
-  // expand/collapse a card
+  // expand/collapse a card; collapse a column from its header
   document.addEventListener('click',function(e){
     var card=e.target.closest('.card');
     if(card && !e.target.closest('a')){card.classList.toggle('open-card');return;}
@@ -513,10 +516,14 @@ main{padding:24px;max-width:1700px;margin:0 auto}
     if(head){head.parentNode.classList.toggle('collapsed');}
   });
 
-  // type toggles
-  Array.prototype.forEach.call(document.querySelectorAll('.toggle'),function(t){
+  // tabs: single-select, one view visible at a time
+  Array.prototype.forEach.call(document.querySelectorAll('.tab'),function(t){
     t.addEventListener('click',function(){
-      var k=t.getAttribute('data-t');types[k]=!types[k];t.classList.toggle('on',types[k]);apply();
+      active=t.getAttribute('data-t');
+      document.querySelectorAll('.tab').forEach(function(x){x.classList.toggle('on',x===t);});
+      for(var k in views){views[k].classList.toggle('on',k===active);}
+      owner.style.display=(active==='D')?'none':'';   // decisions have no owner
+      apply();
     });
   });
   q.addEventListener('input',apply);
@@ -525,25 +532,16 @@ main{padding:24px;max-width:1700px;margin:0 auto}
   function apply(){
     var term=q.value.trim().toLowerCase();
     var own=owner.value;
+    var view=views[active];
     var shown=0;
-    cards.forEach(function(c){
-      var ty=c.getAttribute('data-type');
-      var ok=types[ty];
-      if(ok && term){ok=(c.getAttribute('data-search')||'').indexOf(term)>=0;}
-      if(ok && own && ty!=='D'){ok=(c.getAttribute('data-owner')||'')===own;}
+    view.querySelectorAll('.card,.decision').forEach(function(c){
+      var ok=true;
+      if(term){ok=(c.getAttribute('data-search')||'').indexOf(term)>=0;}
+      if(ok && own && active!=='D'){ok=(c.getAttribute('data-owner')||'')===own;}
       c.classList.toggle('hidden',!ok);
       if(ok)shown++;
     });
-    // hide whole sections when their type is off
-    ['T','Q','D'].forEach(function(k){
-      var on=types[k];
-      var sect=document.querySelector('.section-head[data-sect="'+k+'"]');
-      var board=k==='T'?document.getElementById('tasks'):k==='Q'?document.getElementById('questions'):document.getElementById('decisions');
-      if(sect)sect.classList.toggle('hidden',!on);
-      if(board)board.classList.toggle('hidden',!on);
-    });
-    // recount visible per column
-    document.querySelectorAll('.col').forEach(function(col){
+    view.querySelectorAll('.col').forEach(function(col){
       var n=col.querySelectorAll('.card:not(.hidden)').length;
       col.querySelector('.col-count').textContent=n;
     });
