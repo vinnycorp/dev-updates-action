@@ -100,6 +100,35 @@ def _xref_sub(m):
     return rid
 
 
+# Reverse index: item id -> sorted list of item ids that reference it. Lets each
+# card show "Referenced by ..." so a reader can navigate back up the graph.
+_BACKLINKS = {}
+_TYPE_ORDER = {"T": 0, "Q": 1, "D": 2}
+
+
+def build_backlinks(items):
+    valid = {x["id"] for x in items}
+    back = {}
+    for x in items:
+        text = f'{x.get("ask", "")} {x.get("outcome", "")}'
+        refs = set(re.findall(r"\b([TQD]\d+)\b", text)) & valid
+        refs.discard(x["id"])  # ignore self-references
+        for r in refs:
+            back.setdefault(r, set()).add(x["id"])
+    keyfn = lambda i: (_TYPE_ORDER.get(i[0], 9), int(i[1:]))
+    return {k: sorted(v, key=keyfn) for k, v in back.items()}
+
+
+def backlinks_html(item_id):
+    refs = _BACKLINKS.get(item_id)
+    if not refs:
+        return ""
+    links = " ".join(
+        f'<a class="xref" href="#item-{r}" data-ref="{r}">{r}</a>' for r in refs
+    )
+    return f'<div class="backlinks">&#8617; Referenced by {links}</div>'
+
+
 def inline_md(text: str) -> str:
     """Minimal, safe markdown -> HTML for tracker prose: escape first, then
     re-introduce links, bold and inline code. Escaping before linkifying means
@@ -340,7 +369,8 @@ def card_html(item, repo_url, plan_path):
         f'{"Answered" if item["type"] == "Q" else "Resolved"}</span>{out_bullets}</div>'
         if out_bullets else ""
     )
-    more = '<div class="more"></div>' if (detail or outcome_block) else ""
+    bl = backlinks_html(item["id"])
+    more = '<div class="more"></div>' if (detail or outcome_block or bl) else ""
     haystack = html.escape(
         f'{item["id"]} {("p"+str(prio)) if prio else ""} {owner} {group} {item["ask"]} {item.get("outcome", "")}'.lower(),
         quote=True,
@@ -355,6 +385,7 @@ def card_html(item, repo_url, plan_path):
   <h3 class="card-title">{title}</h3>
   {detail}
   {outcome_block}
+  {bl}
   {more}
 </article>'''
 
@@ -379,20 +410,23 @@ def decision_html(item, repo_url, plan_path):
     title_text = make_title(item["ask"])
     title = inline_md(title_text)
     detail = detail_bullets(item["ask"], title_text)
-    more = '<div class="more"></div>' if detail else ""
+    bl = backlinks_html(item["id"])
+    more = '<div class="more"></div>' if (detail or bl) else ""
     haystack = html.escape(f'{item["id"]} {item["ask"]}'.lower(), quote=True)
     return f'''<article id="item-{item['id']}" class="decision" data-type="D" data-search="{haystack}">
   <div class="d-top"><span class="id">{item['id']}</span><span class="date">{html.escape(item['date'])}</span>{deep_link}</div>
   <h3 class="card-title">{title}</h3>
   {detail}
+  {bl}
   {more}
 </article>'''
 
 
 # --- HTML assembly ----------------------------------------------------------
 def build_html(questions, tasks, decisions, theme, title, subtitle, repo_url, plan_path, as_of):
-    global _VALID_IDS
+    global _VALID_IDS, _BACKLINKS
     _VALID_IDS = {x["id"] for x in (questions + tasks + decisions)}
+    _BACKLINKS = build_backlinks(questions + tasks + decisions)
     c = theme["colors"]
     f = theme["fonts"]
     font_links = "\n  ".join(
@@ -565,6 +599,9 @@ main{padding:20px 24px 44px;max-width:1700px;margin:0 auto}
 .open-card .detail{display:block}
 .detail li{font-size:12px;color:var(--body);line-height:1.5;margin:0 0 5px}
 .detail li:last-child{margin-bottom:0}
+.backlinks{display:none;margin-top:9px;padding-top:8px;border-top:1px solid var(--border);font-size:11px;color:var(--muted)}
+.open-card .backlinks{display:block}
+.backlinks .xref{margin-right:5px}
 .more{margin-top:8px;font-size:10px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;color:var(--gold);opacity:.75}
 .more::after{content:"Details +"}
 .open-card .more::after{content:"Hide -"}
