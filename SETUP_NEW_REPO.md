@@ -215,6 +215,17 @@ implementation detail. Same workflow, same plan file, different
 - **Status pills.** No setup needed. Items prefixed `✅ Shipped:` or
   suffixed `(in progress)` / `(waiting on X)` get auto-styled as
   coloured chips in the email.
+- **Static kanban board.** The digest tells the team what *changed*;
+  a board shows the *whole state at a glance*. Set `dashboard: 'true'`
+  plus `dashboard_plan_file` on the action step and the run renders the
+  Section 7 tables into a single self-contained, themeable HTML file
+  (`board.html`) and commits it back to the repo - a four-column task
+  kanban, a questions lane, and a decisions timeline, with search,
+  filters, and per-card deep links to the plan. Deterministic (no LLM),
+  independent of the digest cooldown, and the commit-back uses
+  `GITHUB_TOKEN` so it never re-triggers the workflow. Grant the job
+  `contents: write`. Full input table in the README's "Static board"
+  section.
 
 ## Updating the digest behaviour later
 

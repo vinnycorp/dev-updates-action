@@ -40,6 +40,38 @@ inputs:
     description: 'Maximum Claude Code conversation turns when generating a summary. Bump if your dev_rules require reading large files (e.g. growing tracker docs).'
     required: false
     default: '30'
+  dashboard:
+    description: 'Generate a static kanban board HTML from the plan tracker tables (true/false). Deterministic - no LLM, no API cost.'
+    required: false
+    default: 'false'
+  dashboard_plan_file:
+    description: 'Path to the plan markdown file holding the Section 7 tracker tables (questions / tasks / decisions). Required when dashboard is true.'
+    required: false
+    default: ''
+  dashboard_output:
+    description: 'Output path for the generated board HTML. Committed back to the repo when dashboard_commit is true.'
+    required: false
+    default: 'board.html'
+  dashboard_title:
+    description: 'Title shown in the board header.'
+    required: false
+    default: 'Project Board'
+  dashboard_subtitle:
+    description: 'Subtitle shown beside the board title.'
+    required: false
+    default: ''
+  dashboard_theme:
+    description: 'JSON string of theme overrides (colors, fonts, font_links, logo_svg). Empty uses a neutral default palette. Use single quotes / a YAML block so inner double quotes survive.'
+    required: false
+    default: ''
+  dashboard_commit:
+    description: 'Commit the regenerated board back to the current branch (true/false). Uses GITHUB_TOKEN, whose pushes do not re-trigger workflows, so there is no loop. Requires contents:write on the calling job.'
+    required: false
+    default: 'true'
+  dashboard_commit_message:
+    description: 'Commit message used when the board changes.'
+    required: false
+    default: 'chore(board): refresh engagement board [skip ci]'
 
 runs:
   using: 'composite'
@@ -257,6 +289,62 @@ runs:
       run: |
         uv run --with telegramify-markdown --with tweepy python3 ${{ github.action_path }}/dispatch.py
         echo "dispatched=true" >> "$GITHUB_OUTPUT"
+
+    # --- Static board (optional) ---------------------------------------------
+    # Deterministic render of the plan's tracker tables. Runs whenever
+    # dashboard=true, INDEPENDENT of the digest cooldown/skip, so the board
+    # always reflects the latest plan even on a run that posts no digest.
+    - name: Generate board
+      if: inputs.dashboard == 'true'
+      shell: bash
+      env:
+        PLAN: ${{ inputs.dashboard_plan_file }}
+        OUT: ${{ inputs.dashboard_output }}
+        TITLE: ${{ inputs.dashboard_title }}
+        SUBTITLE: ${{ inputs.dashboard_subtitle }}
+        THEME: ${{ inputs.dashboard_theme }}
+        SERVER: ${{ github.server_url }}
+        REPO: ${{ github.repository }}
+      run: |
+        if [[ -z "$PLAN" ]]; then
+          echo "::error::dashboard=true but dashboard_plan_file is empty."; exit 1
+        fi
+        THEME_ARG=""
+        if [[ -n "$THEME" ]]; then
+          printf '%s' "$THEME" > /tmp/board-theme.json
+          THEME_ARG="--theme /tmp/board-theme.json"
+        fi
+        # 'Updated' stamp = the plan file's last commit date. Stable per content
+        # (so an unchanged plan never produces a new board) and never a future
+        # 'revisit on' date sitting inside a tracker row.
+        ASOF="$(git log -1 --format=%cs -- "$PLAN" 2>/dev/null || true)"
+        ASOF_ARG=""
+        if [[ -n "$ASOF" ]]; then ASOF_ARG="--as-of $ASOF"; fi
+        python3 "${{ github.action_path }}/board.py" \
+          --plan "$PLAN" --out "$OUT" \
+          --title "$TITLE" --subtitle "$SUBTITLE" \
+          --repo-url "$SERVER/$REPO" \
+          $THEME_ARG $ASOF_ARG
+
+    - name: Commit board
+      if: inputs.dashboard == 'true' && inputs.dashboard_commit == 'true'
+      shell: bash
+      env:
+        OUT: ${{ inputs.dashboard_output }}
+        MSG: ${{ inputs.dashboard_commit_message }}
+        BRANCH: ${{ github.ref_name }}
+      run: |
+        if [[ -z "$(git status --porcelain -- "$OUT")" ]]; then
+          echo "::notice::Board unchanged - nothing to commit."
+          exit 0
+        fi
+        git config user.name "github-actions[bot]"
+        git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+        git add "$OUT"
+        git commit -m "$MSG"
+        # GITHUB_TOKEN pushes do NOT re-trigger workflows (GitHub's built-in
+        # recursion guard), so this never loops. Non-fatal on a push race.
+        git push origin "HEAD:$BRANCH" || echo "::warning::Board push failed (non-fatal) - refreshes on next run."
 
     # --- Save state for next run ---
     # Forward previous state when skipped (cooldown), save new state only when dispatch succeeded

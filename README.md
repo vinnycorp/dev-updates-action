@@ -91,6 +91,7 @@ Compared to the upstream `alphakek-ai/dev-updates-action`:
 5. **Auto-status pills** in the email - lines containing `(in progress)`, `(waiting on ...)`, or a `✅ Shipped:` prefix are auto-styled as colored chips so the digest scans like a status board.
 6. **Auto subject de-doubling** - if your `subject_prefix` is `[Project]` and the LLM titles the digest "Project Dev Updates ...", the leading "Project" is stripped from the title so the subject only carries the bracket once.
 7. **`preview_url` field** on the email channel - if you point this at a staging/preview URL, a "View live preview" link renders in the email header bar (useful for design or marketing repos that ship to a Vercel/Netlify preview).
+8. **Static kanban board** - an optional, deterministic (no-LLM) render of the plan's Section 7 tracker tables into a single self-contained, themeable HTML file, committed back to the repo on every run. See [Static board](#static-board) below.
 
 Everything else is upstream-compatible. Existing telegram/discord/slack/twitter configs continue to work unchanged.
 
@@ -239,6 +240,60 @@ If you're sending to a non-Gmail-heavy audience, fork and re-tune `_markdown_to_
 | `access_token_secret_env` | no | Default: `TWITTER_ACCESS_TOKEN_SECRET` |
 | `max_length` | no | Truncate the tweet to N chars. `0` disables. |
 | `mode` | no | `dev` (links to GitHub) or `community` (no link) |
+
+## Static board
+
+The digest answers "what changed?" The board answers "what's the state of everything right now?" It's a **deterministic** render - pure parsing, no LLM, no API cost, no hallucinated cards - of the same three tracker tables the digest reads (Section 7.1 open questions, 7.2 action items, 7.3 decisions log). The output is one self-contained HTML file (inline CSS + a sprinkle of vanilla JS, no build step, no hosting): open it straight off disk.
+
+Layout: a four-column task kanban (Open / In progress / Blocked / Done), a separate two-column lane for questions (Open / Answered), and a reverse-chronological decisions timeline. Global search, an owner filter, type toggles, click-to-expand cards, collapsed-by-default Done/Answered columns, and per-card deep links back to the exact line in the plan on GitHub.
+
+Enable it by adding the `dashboard_*` inputs to the same action step:
+
+```yaml
+    - uses: vinnycorp/dev-updates-action@v1
+      with:
+        # ... your channels / dev_rules ...
+        dashboard: 'true'
+        dashboard_plan_file: 'project-plan.md'
+        dashboard_output: 'board.html'          # committed back to the repo
+        dashboard_title: 'Project Board'
+        dashboard_subtitle: 'live tracker'
+        dashboard_theme: |
+          { "colors": { "navy": "#0c1828", "gold": "#7e6717" },
+            "logo_svg": "<span class=\"wordmark\">ACME</span>" }
+```
+
+and grant the job write access so the refreshed board can be committed:
+
+```yaml
+    permissions:
+      contents: write   # board commit-back
+      id-token: write
+      actions: read
+```
+
+How it stays fresh without looping: the board step runs on every trigger (independent of the digest cooldown), regenerates the HTML, and commits it **only if it changed**. The commit uses the workflow's `GITHUB_TOKEN`, and GitHub deliberately does **not** start a new workflow run for `GITHUB_TOKEN` pushes - so the board commit never re-triggers the digest, and there is no email storm. The "Updated" stamp is the plan file's last commit date (stable per content, so an unchanged plan never churns a new commit), not wall-clock time.
+
+Board inputs:
+
+| Input | Default | Notes |
+|---|---|---|
+| `dashboard` | `false` | Master switch. |
+| `dashboard_plan_file` | `''` | Path to the plan markdown. Required when `dashboard` is true. |
+| `dashboard_output` | `board.html` | Output path, committed back to the repo. Don't gitignore it. |
+| `dashboard_title` | `Project Board` | Header title. |
+| `dashboard_subtitle` | `''` | Header subtitle. |
+| `dashboard_theme` | `''` | JSON overrides: `colors`, `fonts`, `font_links`, `logo_svg`. Empty = neutral palette. Same double-quote sharp edge as `dev_rules` - use a YAML block and escape inner quotes. |
+| `dashboard_commit` | `true` | Set false to generate without committing (e.g. to upload as an artifact yourself). |
+| `dashboard_commit_message` | `chore(board): refresh engagement board [skip ci]` | |
+
+Parsing is forgiving by design: rows are classified by their `Q`/`T`/`D` id prefix regardless of which sub-heading they sit under (a misfiled row still lands in the right lane), and a row whose trailing backtick is missing is still parsed rather than dropped. Run it locally to preview:
+
+```bash
+python3 board.py --plan project-plan.md --out board.html \
+  --title 'Project Board' --repo-url https://github.com/org/repo \
+  --theme theme.json
+```
 
 ## Writing good `dev_rules`
 
