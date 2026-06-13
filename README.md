@@ -122,7 +122,8 @@ Channels are inline YAML in the `channels` input. Each entry needs a `type`. Oth
 | `from` | yes | Sender. Format: `"Name <addr@domain>"`. The domain must be verified in Resend. |
 | `subject_prefix` | no | Prepended to the auto-generated subject. Default: `"[Dev]"`. Use `"[Project]"` style; if the LLM also titles the digest "Project ...", the duplicate is stripped automatically. |
 | `reply_to` | no | Reply-to address. |
-| `preview_url` | no | URL to a live preview/staging site. If set, a "View live preview" link renders ahead of the GitHub link in the email header. Useful for design or website repos. |
+| `preview_url` | no | URL to a live preview/staging site. If set, a link renders ahead of the GitHub link in the email header. Useful for design or website repos. |
+| `preview_label` | no | Text for the `preview_url` link. Default: `"View live preview"`. Set e.g. `"View live tracker"` when pointing at a board file rather than a staging site. |
 | `api_key_env` | no | Env var holding the Resend API key. Default: `RESEND_API_KEY`. |
 | `mode` | no | `dev` (default - includes a github-link footer) or `community` (link omitted). |
 

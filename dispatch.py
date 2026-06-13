@@ -401,9 +401,10 @@ def send_email(ch, content, repo, repo_name, commits, files):
     html_body = _markdown_to_html(content)
 
     preview_url = ch.get("preview_url", "")
+    preview_label = ch.get("preview_label", "View live preview")
     preview_anchor = (
         f'<a href="{preview_url}" style="color:#7e6717;text-decoration:none;font-weight:600;">'
-        f'View live preview</a>'
+        f'{preview_label}</a>'
         f'<span style="margin:0 8px;color:#c9bfa8;">|</span>'
     ) if preview_url else ""
     header_html = (
