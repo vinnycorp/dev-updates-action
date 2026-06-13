@@ -108,15 +108,24 @@ _TYPE_ORDER = {"T": 0, "Q": 1, "D": 2}
 
 def build_backlinks(items):
     valid = {x["id"] for x in items}
-    back = {}
+    back, fwd = {}, {}
     for x in items:
         text = f'{x.get("ask", "")} {x.get("outcome", "")}'
         refs = set(re.findall(r"\b([TQD]\d+)\b", text)) & valid
         refs.discard(x["id"])  # ignore self-references
+        fwd[x["id"]] = refs    # what this item references (shown inline in its body)
         for r in refs:
             back.setdefault(r, set()).add(x["id"])
     keyfn = lambda i: (_TYPE_ORDER.get(i[0], 9), int(i[1:]))
-    return {k: sorted(v, key=keyfn) for k, v in back.items()}
+    # A referrer this item ALSO references is already visible as an inline link
+    # in its body, so drop it here - "Referenced by" then lists only the
+    # incoming-only references you couldn't otherwise discover.
+    out = {}
+    for k, referrers in back.items():
+        unique = referrers - fwd.get(k, set())
+        if unique:
+            out[k] = sorted(unique, key=keyfn)
+    return out
 
 
 def backlinks_html(item_id):
