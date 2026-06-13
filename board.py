@@ -74,6 +74,54 @@ def inline_md(text: str) -> str:
     return esc
 
 
+# Abbreviations whose trailing period must NOT end a sentence.
+ABBREV = {"e.g", "i.e", "etc", "vs", "no", "fig", "dr", "mr", "mrs", "ms", "inc",
+          "ltd", "co", "st", "approx", "est", "cf", "al", "jr", "sr", "u.s",
+          "ph.d", "a.m", "p.m", "mt", "sgd", "usd", "ie", "eg"}
+_SENT_BOUND = re.compile(r"[.?!]\s+(?=[A-Z0-9(])")
+_MD_LINK = re.compile(r"\[([^\]]+)\]\([^)]*\)")
+
+
+def split_sentences(text):
+    """Split prose into sentences. Deterministic and conservative: a period only
+    ends a sentence when followed by whitespace and a capital/number/paren, and
+    not when the preceding token is a known abbreviation. Decimals and URLs
+    (period not followed by whitespace) are never split."""
+    out, start = [], 0
+    for m in _SENT_BOUND.finditer(text):
+        end = m.start()
+        before = text[:end]
+        wm = re.search(r"([A-Za-z][A-Za-z.]*)[)\]\"'’]*$", before)
+        word = wm.group(1).lower().rstrip(".") if wm else ""
+        if word in ABBREV:
+            continue
+        seg = text[start:end + 1].strip()
+        if seg:
+            out.append(seg)
+        start = m.end()
+    tail = text[start:].strip()
+    if tail:
+        out.append(tail)
+    return out
+
+
+def make_title(text, limit=90):
+    """Derive a concise heading from a row's prose: the first sentence, trimmed
+    at the first parenthetical or colon clause, with markdown links flattened to
+    their text. Hard-capped at `limit` chars on a word boundary."""
+    sents = split_sentences(text)
+    head = sents[0] if sents else text
+    head = _MD_LINK.sub(r"\1", head)
+    head = re.sub(r"\s+", " ", head).strip()
+    cuts = [i for sep in (" (", ": ") for i in [head.find(sep)] if i >= 25]
+    if cuts:
+        head = head[:min(cuts)]
+    head = head.strip(" .:;,-")
+    if len(head) > limit:
+        head = head[:limit].rsplit(" ", 1)[0].rstrip(" .:;,-") + "…"
+    return head
+
+
 def slice_section(lines, start_re, *stop_res):
     """Return (start_index, list_of_lines) for the block opened by start_re and
     closed by the first of stop_res (or EOF)."""
@@ -207,30 +255,40 @@ STATUS_LABEL = {
 }
 
 
+def detail_bullets(text, title=None):
+    """Prose rendered one <li> per sentence. If `title` already captures the
+    first sentence verbatim (i.e. the title wasn't truncated), drop that first
+    bullet so the heading isn't echoed; otherwise keep everything."""
+    sents = split_sentences(text)
+    if title and sents:
+        first = re.sub(r"\s+", " ", _MD_LINK.sub(r"\1", sents[0])).strip().rstrip(" .:;,-")
+        if first == title.rstrip("…").strip():
+            sents = sents[1:]
+    if not sents:
+        return ""
+    return '<ul class="detail">' + "".join(f"<li>{inline_md(s)}</li>" for s in sents) + "</ul>"
+
+
 def card_html(item, repo_url, plan_path):
-    ask_html = inline_md(item["ask"])
-    out_html = inline_md(item["outcome"]) if item.get("outcome") else ""
     owner = item.get("owner", "")
-    owner_chip = (
-        f'<span class="chip owner">{html.escape(owner)}</span>' if owner else ""
-    )
+    owner_chip = f'<span class="chip owner">{html.escape(owner)}</span>' if owner else ""
     group = item.get("group", "")
-    group_chip = (
-        f'<span class="chip group">{html.escape(group)}</span>' if group else ""
-    )
-    deep = (
-        f'{repo_url}/blob/main/{plan_path}#L{item["line"]}' if repo_url else ""
-    )
+    group_chip = f'<span class="chip group">{html.escape(group)}</span>' if group else ""
+    deep = f'{repo_url}/blob/main/{plan_path}#L{item["line"]}' if repo_url else ""
     deep_link = (
         f'<a class="src" href="{deep}" target="_blank" rel="noopener" '
         f'title="View in plan">{ARROW}</a>' if deep else ""
     )
+    title_text = make_title(item["ask"])
+    title = inline_md(title_text)
+    detail = detail_bullets(item["ask"], title_text)
+    out_bullets = detail_bullets(item["outcome"]) if item.get("outcome") else ""
     outcome_block = (
         f'<div class="outcome"><span class="outcome-tag">'
-        f'{"Answered" if item["type"] == "Q" else "Resolved"}</span>{out_html}</div>'
-        if out_html else ""
+        f'{"Answered" if item["type"] == "Q" else "Resolved"}</span>{out_bullets}</div>'
+        if out_bullets else ""
     )
-    # data-search lowercased haystack for the filter box
+    more = '<div class="more"></div>' if (detail or outcome_block) else ""
     haystack = html.escape(
         f'{item["id"]} {owner} {group} {item["ask"]} {item.get("outcome", "")}'.lower(),
         quote=True,
@@ -242,8 +300,10 @@ def card_html(item, repo_url, plan_path):
     <span class="date">{html.escape(item['date'])}</span>
     {deep_link}
   </div>
-  <div class="card-body">{ask_html}</div>
+  <h3 class="card-title">{title}</h3>
+  {detail}
   {outcome_block}
+  {more}
 </article>'''
 
 
@@ -264,10 +324,16 @@ def decision_html(item, repo_url, plan_path):
         f'<a class="src" href="{deep}" target="_blank" rel="noopener" title="View in plan">{ARROW}</a>'
         if deep else ""
     )
+    title_text = make_title(item["ask"])
+    title = inline_md(title_text)
+    detail = detail_bullets(item["ask"], title_text)
+    more = '<div class="more"></div>' if detail else ""
     haystack = html.escape(f'{item["id"]} {item["ask"]}'.lower(), quote=True)
     return f'''<article class="decision" data-type="D" data-search="{haystack}">
   <div class="d-top"><span class="id">{item['id']}</span><span class="date">{html.escape(item['date'])}</span>{deep_link}</div>
-  <div class="d-body">{inline_md(item['ask'])}</div>
+  <h3 class="card-title">{title}</h3>
+  {detail}
+  {more}
 </article>'''
 
 
@@ -448,23 +514,29 @@ main{padding:20px 24px 44px;max-width:1700px;margin:0 auto}
 .date{font-family:var(--f-mono);font-size:10.5px;color:var(--muted);margin-left:auto}
 .src{font-family:var(--f-mono);text-decoration:none;color:var(--muted);font-size:13px;padding:0 2px}
 .src:hover{color:var(--gold)}
-.card-body{font-size:13px;color:var(--body);max-height:4.6em;overflow:hidden;position:relative;-webkit-line-clamp:3}
-.card.open-card .card-body{max-height:none}
-.card-body::after{content:"";position:absolute;bottom:0;left:0;right:0;height:1.5em;background:linear-gradient(transparent,var(--panel));pointer-events:none}
-.card.open-card .card-body::after{display:none}
-.outcome{display:none;margin-top:9px;padding:9px 10px;background:rgba(45,122,61,.07);border-radius:6px;font-size:12.5px;color:var(--body)}
-.card.open-card .outcome{display:block}
-.outcome-tag{display:inline-block;font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--up);margin-right:7px}
+.card-title{margin:0;font-size:13.5px;font-weight:600;color:var(--ink);line-height:1.4;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+.open-card .card-title{-webkit-line-clamp:unset;overflow:visible}
+.detail{display:none;margin:9px 0 0;padding-left:17px}
+.open-card .detail{display:block}
+.detail li{font-size:12px;color:var(--body);line-height:1.5;margin:0 0 5px}
+.detail li:last-child{margin-bottom:0}
+.more{margin-top:8px;font-size:10px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;color:var(--gold);opacity:.75}
+.more::after{content:"Show details +"}
+.open-card .more::after{content:"Hide -"}
+.outcome{display:none;margin-top:9px;padding:8px 11px;background:rgba(45,122,61,.07);border-radius:6px}
+.open-card .outcome{display:block}
+.outcome-tag{display:block;font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--up);margin-bottom:3px}
+.outcome .detail{display:block;margin:0;padding-left:16px}
+.outcome .detail li{color:var(--body)}
 .empty{color:var(--muted);font-size:12px;font-style:italic;padding:6px 2px;margin:0}
 
 /* decisions */
 .decisions{display:flex;flex-direction:column;gap:0;border-left:2px solid var(--border);margin-left:6px}
-.decision{position:relative;padding:11px 0 11px 22px}
+.decision{position:relative;padding:11px 0 13px 22px;cursor:pointer}
 .decision::before{content:"";position:absolute;left:-7px;top:16px;width:10px;height:10px;border-radius:50%;background:var(--gold);border:2px solid var(--paper)}
-.d-top{display:flex;align-items:center;gap:10px;margin-bottom:3px}
+.d-top{display:flex;align-items:center;gap:10px;margin-bottom:4px}
 .d-top .id{background:var(--gold-pale)}
-.d-body{font-size:13px;color:var(--body)}
-.decision.clip .d-body{max-height:3em;overflow:hidden}
+.decision .card-title{font-weight:600}
 .hidden{display:none!important}
 
 @media(max-width:1100px){.board{grid-template-columns:repeat(2,1fr)}}
@@ -517,10 +589,10 @@ main{padding:20px 24px 44px;max-width:1700px;margin:0 auto}
   var active='T';
   var views={T:document.getElementById('view-T'),Q:document.getElementById('view-Q'),D:document.getElementById('view-D')};
 
-  // expand/collapse a card; collapse a column from its header
+  // expand/collapse a card or decision; collapse a column from its header
   document.addEventListener('click',function(e){
-    var card=e.target.closest('.card');
-    if(card && !e.target.closest('a')){card.classList.toggle('open-card');return;}
+    var item=e.target.closest('.card,.decision');
+    if(item && !e.target.closest('a')){item.classList.toggle('open-card');return;}
     var head=e.target.closest('.col-head');
     if(head){head.parentNode.classList.toggle('collapsed');}
   });
