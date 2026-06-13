@@ -296,12 +296,20 @@ def build_html(questions, tasks, decisions, theme, title, subtitle, repo_url, pl
         column("Done", "done", t_done, repo_url, plan_path, collapsed=True),
     ])
 
-    q_open = sorted([q for q in questions if q["status"] == "open"], key=lambda x: -x["num"])
+    # Open questions: one column per addressee (busiest first), then a single
+    # answered/closed column.
+    q_open = [q for q in questions if q["status"] == "open"]
     q_ans = sorted([q for q in questions if q["status"] == "answered"], key=lambda x: -x["num"])
-    q_cols = "\n".join([
-        column("Open questions", "open", q_open, repo_url, plan_path),
-        column("Answered", "answered", q_ans, repo_url, plan_path, collapsed=True),
-    ])
+    by_owner = {}
+    for q in q_open:
+        by_owner.setdefault(q["owner"] or "Unassigned", []).append(q)
+    owner_order = sorted(by_owner, key=lambda o: (-len(by_owner[o]), o.lower()))
+    q_col_parts = [
+        column(o, "open", sorted(by_owner[o], key=lambda x: -x["num"]), repo_url, plan_path)
+        for o in owner_order
+    ]
+    q_col_parts.append(column("Answered / closed", "answered", q_ans, repo_url, plan_path, collapsed=True))
+    q_cols = "\n".join(q_col_parts)
 
     d_sorted = sorted(decisions, key=lambda x: -x["num"])
     decisions_html = "\n".join(decision_html(d, repo_url, plan_path) for d in d_sorted) \
@@ -409,7 +417,8 @@ main{padding:20px 24px 44px;max-width:1700px;margin:0 auto}
 
 /* kanban */
 .board{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;align-items:start}
-.board.q{grid-template-columns:1fr 1fr;max-width:980px}
+.board.q{display:flex;gap:14px;overflow-x:auto;padding-bottom:10px;align-items:flex-start}
+.board.q .col{flex:1 0 260px}
 .col{background:rgba(0,0,0,.018);border:1px solid var(--border);border-radius:10px;min-height:60px}
 .col-head{display:flex;align-items:center;justify-content:space-between;padding:11px 14px;border-bottom:1px solid var(--border);cursor:pointer;position:sticky;top:0}
 .col-title{font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--ink)}
