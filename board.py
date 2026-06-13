@@ -73,6 +73,19 @@ def prio_rank(item):
     return {1: 0, 2: 1, 0: 2, 3: 3}.get(item.get("priority", 0), 2)
 
 
+_DATE = re.compile(r"\d{4}-\d{2}-\d{2}")
+
+
+def completed_date(item):
+    """When the item was completed, used to order the Done column. The first
+    ISO date in the resolution text (after the arrow) is the completion date -
+    e.g. 'DONE 2026-06-02 ...'. Falls back to the opened date. Deliberately
+    NOT the max date in the row, which would be skewed by deadlines or future
+    dates mentioned in the prose."""
+    m = _DATE.search(item.get("outcome", ""))
+    return m.group(0) if m else item.get("date", "")
+
+
 def inline_md(text: str) -> str:
     """Minimal, safe markdown -> HTML for tracker prose: escape first, then
     re-introduce links, bold and inline code. Escaping before linkifying means
@@ -370,15 +383,17 @@ def build_html(questions, tasks, decisions, theme, title, subtitle, repo_url, pl
             + font_links
         )
 
-    # task columns (priority first, then most-recent)
+    # active task columns: priority first, then most-recent
     by = lambda st: sorted([t for t in tasks if t["status"] == st], key=lambda x: (prio_rank(x), -x["num"]))
-    t_open, t_prog = by("open"), by("in_progress")
-    t_block, t_done = by("blocked"), by("done")
+    t_open, t_prog, t_block = by("open"), by("in_progress"), by("blocked")
+    # Done column: most-recently-completed at the top (priority is moot once done)
+    t_done = sorted([t for t in tasks if t["status"] == "done"],
+                    key=lambda x: (completed_date(x), x["num"]), reverse=True)
     task_cols = "\n".join([
         column("Open", "open", t_open, repo_url, plan_path),
         column("In progress", "in_progress", t_prog, repo_url, plan_path),
         column("Blocked", "blocked", t_block, repo_url, plan_path),
-        column("Done", "done", t_done, repo_url, plan_path, collapsed=True),
+        column("Done", "done", t_done, repo_url, plan_path),
     ])
 
     # Open questions: one column per addressee (busiest first), then a single
@@ -410,19 +425,6 @@ def build_html(questions, tasks, decisions, theme, title, subtitle, repo_url, pl
                     | {q["owner"] for q in questions if q["owner"]})
     owner_opts = "\n".join(f'<option value="{html.escape(o, quote=True)}">{html.escape(o)}</option>' for o in owners)
 
-    kpis = [
-        ("Open tasks", len(t_open), "open"),
-        ("In progress", len(t_prog), "in_progress"),
-        ("Blocked", len(t_block), "blocked"),
-        ("Done", len(t_done), "done"),
-        ("Open questions", len(q_open), "qopen"),
-        ("Decisions", len(decisions), "dec"),
-    ]
-    kpi_html = "\n".join(
-        f'<div class="kpi k-{k}"><span class="kpi-n">{n}</span><span class="kpi-l">{lbl}</span></div>'
-        for lbl, n, k in kpis
-    )
-
     logo = theme.get("logo_svg", "") or f'<span class="wordmark">{html.escape(title)}</span>'
 
     return TEMPLATE \
@@ -432,7 +434,9 @@ def build_html(questions, tasks, decisions, theme, title, subtitle, repo_url, pl
         .replace("%%LOGO%%", logo) \
         .replace("%%LAST_UPDATED%%", html.escape(last_updated)) \
         .replace("%%PLAN_LINK%%", f'{repo_url}/blob/main/{plan_path}' if repo_url else "#") \
-        .replace("%%KPIS%%", kpi_html) \
+        .replace("%%N_T%%", str(len(tasks))) \
+        .replace("%%N_Q%%", str(len(questions))) \
+        .replace("%%N_D%%", str(len(decisions))) \
         .replace("%%OWNER_OPTS%%", owner_opts) \
         .replace("%%TASK_COLS%%", task_cols) \
         .replace("%%Q_COLS%%", q_cols) \
@@ -473,15 +477,6 @@ code{font-family:var(--f-mono);font-size:.86em;background:rgba(0,0,0,.05);paddin
 .top .meta a{color:var(--gold-bright)}
 .updated{font-family:var(--f-mono)}
 
-/* kpis */
-.kpis{display:flex;gap:10px;flex-wrap:wrap;margin-top:14px}
-.kpi{background:rgba(255,255,255,.06);border:1px solid var(--navy-border);border-radius:8px;padding:8px 14px;display:flex;flex-direction:column;min-width:96px}
-.kpi-n{font-family:var(--f-mono);font-size:22px;font-weight:600;color:#fff;line-height:1}
-.kpi-l{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:rgba(255,255,255,.55);margin-top:4px}
-.k-in_progress .kpi-n{color:var(--gold-bright)}
-.k-blocked .kpi-n{color:#e98b8b}
-.k-done .kpi-n{color:#7fce8f}
-
 /* toolbar */
 .toolbar{position:sticky;top:0;z-index:20;background:var(--paper);border-bottom:1px solid var(--border);padding:12px 24px;display:flex;gap:12px;align-items:center;flex-wrap:wrap}
 .toolbar input[type=search],.toolbar select{font-family:var(--f-sans);font-size:13px;padding:7px 11px;border:1px solid var(--border);border-radius:7px;background:var(--panel);color:var(--ink)}
@@ -491,6 +486,7 @@ code{font-family:var(--f-mono);font-size:.86em;background:rgba(0,0,0,.05);paddin
 .tab:last-child{border-right:none}
 .tab:hover{color:var(--ink);background:rgba(0,0,0,.025)}
 .tab.on{background:var(--navy);color:#fff}
+.tab-n{font-family:var(--f-mono);font-size:11px;opacity:.6;margin-left:3px}
 .spacer{flex:1}
 .count-live{font-size:12px;color:var(--muted);font-family:var(--f-mono)}
 
@@ -575,14 +571,13 @@ main{padding:20px 24px 44px;max-width:1700px;margin:0 auto}
       <a href="%%PLAN_LINK%%" target="_blank" rel="noopener">View plan &#8599;</a>
     </div>
   </div>
-  <div class="kpis">%%KPIS%%</div>
 </header>
 
 <div class="toolbar">
   <div class="tabs">
-    <button class="tab on" data-t="T">Tasks</button>
-    <button class="tab" data-t="Q">Questions</button>
-    <button class="tab" data-t="D">Decisions</button>
+    <button class="tab on" data-t="T">Tasks <span class="tab-n">%%N_T%%</span></button>
+    <button class="tab" data-t="Q">Questions <span class="tab-n">%%N_Q%%</span></button>
+    <button class="tab" data-t="D">Decisions <span class="tab-n">%%N_D%%</span></button>
   </div>
   <input type="search" id="q" placeholder="Search...">
   <select id="owner"><option value="">All owners</option>%%OWNER_OPTS%%</select>
