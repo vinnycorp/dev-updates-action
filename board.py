@@ -86,11 +86,26 @@ def completed_date(item):
     return m.group(0) if m else item.get("date", "")
 
 
+# Cross-references to other tracker items (e.g. "T42", "Q40", "D7"). Linked
+# only when the id actually exists, so there are never dead links. Populated by
+# build_html() before any card is rendered.
+_VALID_IDS = set()
+_XREF = re.compile(r"\b([TQD]\d+)\b")
+
+
+def _xref_sub(m):
+    rid = m.group(1)
+    if rid in _VALID_IDS:
+        return f'<a class="xref" href="#item-{rid}" data-ref="{rid}">{rid}</a>'
+    return rid
+
+
 def inline_md(text: str) -> str:
     """Minimal, safe markdown -> HTML for tracker prose: escape first, then
     re-introduce links, bold and inline code. Escaping before linkifying means
     any "&" inside a URL becomes "&amp;", which is the correct form in an
-    href, so the order is deliberate."""
+    href, so the order is deliberate. Finally, cross-link T/Q/D references to
+    their card - only in text segments, never inside an existing tag."""
     esc = html.escape(text, quote=False)
     esc = re.sub(r"\*\*([^*]+)\*\*", r"<strong>\1</strong>", esc)
     esc = re.sub(r"`([^`]+)`", r"<code>\1</code>", esc)
@@ -99,6 +114,11 @@ def inline_md(text: str) -> str:
         r'<a href="\2" target="_blank" rel="noopener">\1</a>',
         esc,
     )
+    if _VALID_IDS:
+        segs = re.split(r"(<[^>]+>)", esc)
+        for i in range(0, len(segs), 2):  # even indices are text outside tags
+            segs[i] = _XREF.sub(_xref_sub, segs[i])
+        esc = "".join(segs)
     return esc
 
 
@@ -325,7 +345,7 @@ def card_html(item, repo_url, plan_path):
         f'{item["id"]} {("p"+str(prio)) if prio else ""} {owner} {group} {item["ask"]} {item.get("outcome", "")}'.lower(),
         quote=True,
     )
-    return f'''<article class="card s-{item['status']}" data-type="{item['type']}" data-status="{item['status']}" data-owner="{html.escape(owner, quote=True)}" data-search="{haystack}">
+    return f'''<article id="item-{item['id']}" class="card s-{item['status']}" data-type="{item['type']}" data-status="{item['status']}" data-owner="{html.escape(owner, quote=True)}" data-search="{haystack}">
   <div class="card-top">
     <span class="id">{item['id']}</span>
     {prio_chip}{owner_chip}{group_chip}
@@ -361,7 +381,7 @@ def decision_html(item, repo_url, plan_path):
     detail = detail_bullets(item["ask"], title_text)
     more = '<div class="more"></div>' if detail else ""
     haystack = html.escape(f'{item["id"]} {item["ask"]}'.lower(), quote=True)
-    return f'''<article class="decision" data-type="D" data-search="{haystack}">
+    return f'''<article id="item-{item['id']}" class="decision" data-type="D" data-search="{haystack}">
   <div class="d-top"><span class="id">{item['id']}</span><span class="date">{html.escape(item['date'])}</span>{deep_link}</div>
   <h3 class="card-title">{title}</h3>
   {detail}
@@ -371,6 +391,8 @@ def decision_html(item, repo_url, plan_path):
 
 # --- HTML assembly ----------------------------------------------------------
 def build_html(questions, tasks, decisions, theme, title, subtitle, repo_url, plan_path, as_of):
+    global _VALID_IDS
+    _VALID_IDS = {x["id"] for x in (questions + tasks + decisions)}
     c = theme["colors"]
     f = theme["fonts"]
     font_links = "\n  ".join(
@@ -533,6 +555,10 @@ main{padding:20px 24px 44px;max-width:1700px;margin:0 auto}
 .date{font-family:var(--f-mono);font-size:10.5px;color:var(--muted);margin-left:auto}
 .src{font-family:var(--f-mono);text-decoration:none;color:var(--muted);font-size:13px;padding:0 2px}
 .src:hover{color:var(--gold)}
+.xref{color:var(--gold);font-family:var(--f-mono);font-size:.92em;text-decoration:none;border-bottom:1px dotted;border-radius:2px;cursor:pointer}
+.xref:hover{border-bottom-style:solid;background:var(--gold-pale)}
+.flash{animation:xflash 1.7s ease-out}
+@keyframes xflash{0%,25%{box-shadow:0 0 0 2px var(--gold),0 4px 16px rgba(0,0,0,.14)}100%{box-shadow:0 0 0 0 rgba(0,0,0,0)}}
 .card-title{margin:0;font-size:13.5px;font-weight:500;color:var(--body);line-height:1.4;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
 .open-card .card-title{-webkit-line-clamp:unset;overflow:visible}
 .detail{display:none;margin:9px 0 0;padding-left:17px}
@@ -606,13 +632,38 @@ main{padding:20px 24px 44px;max-width:1700px;margin:0 auto}
   var active='T';
   var views={T:document.getElementById('view-T'),Q:document.getElementById('view-Q'),D:document.getElementById('view-D')};
 
+  // cross-reference click -> jump to the referenced card
   // expand/collapse a card or decision; collapse a column from its header
   document.addEventListener('click',function(e){
+    var x=e.target.closest('.xref');
+    if(x){e.preventDefault();showItem(x.getAttribute('data-ref'));return;}
     var item=e.target.closest('.card,.decision');
     if(item && !e.target.closest('a')){item.classList.toggle('open-card');return;}
     var head=e.target.closest('.col-head');
     if(head){head.parentNode.classList.toggle('collapsed');}
   });
+
+  function showItem(ref){
+    var el=document.getElementById('item-'+ref);
+    if(!el)return;
+    q.value='';owner.value='';                 // clear filters so the target shows
+    var type=ref.charAt(0);                     // T / Q / D -> tab
+    var tab=document.querySelector('.tab[data-t="'+type+'"]');
+    if(tab){
+      active=type;
+      document.querySelectorAll('.tab').forEach(function(t){t.classList.toggle('on',t===tab);});
+      for(var k in views){views[k].classList.toggle('on',k===type);}
+      owner.style.display=(type==='D')?'none':'';
+    }
+    apply();
+    var col=el.closest('.col');if(col)col.classList.remove('collapsed');
+    el.classList.remove('hidden');el.classList.add('open-card');
+    requestAnimationFrame(function(){
+      el.scrollIntoView({behavior:'smooth',block:'center',inline:'center'});
+      el.classList.add('flash');
+      setTimeout(function(){el.classList.remove('flash');},1700);
+    });
+  }
 
   // tabs: single-select, one view visible at a time
   Array.prototype.forEach.call(document.querySelectorAll('.tab'),function(t){
