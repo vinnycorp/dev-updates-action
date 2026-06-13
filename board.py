@@ -514,7 +514,7 @@ main{padding:20px 24px 44px;max-width:1700px;margin:0 auto}
 .date{font-family:var(--f-mono);font-size:10.5px;color:var(--muted);margin-left:auto}
 .src{font-family:var(--f-mono);text-decoration:none;color:var(--muted);font-size:13px;padding:0 2px}
 .src:hover{color:var(--gold)}
-.card-title{margin:0;font-size:13.5px;font-weight:500;color:var(--ink);line-height:1.4;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+.card-title{margin:0;font-size:13.5px;font-weight:500;color:var(--body);line-height:1.4;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
 .open-card .card-title{-webkit-line-clamp:unset;overflow:visible}
 .detail{display:none;margin:9px 0 0;padding-left:17px}
 .open-card .detail{display:block}
