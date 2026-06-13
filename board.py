@@ -56,6 +56,21 @@ GROUP_BOLD = re.compile(r"^\s*\*\*(.+?)\*\*\s*$")
 GROUP_SUB = re.compile(r"^####\s+(?!7\.)(.+?)\s*$")
 
 ARROW = "→"  # the resolution marker used in the tracker rows
+# Optional, backward-compatible priority tag leading a description: [P1] high,
+# [P2] medium, [P3] low. Absent => unprioritized. Stripped from the title.
+PRIORITY = re.compile(r"^\s*\[?[Pp]([123])\]?[.:)\s-]+")
+
+
+def extract_priority(desc):
+    m = PRIORITY.match(desc)
+    if m:
+        return int(m.group(1)), desc[m.end():]
+    return 0, desc
+
+
+def prio_rank(item):
+    # sort order within a column: P1 top, P2, untagged, P3 bottom
+    return {1: 0, 2: 1, 0: 2, 3: 3}.get(item.get("priority", 0), 2)
 
 
 def inline_md(text: str) -> str:
@@ -147,6 +162,7 @@ def parse_qt(kind, num, body, line_no):
     status = parts[1].strip().lower() if len(parts) > 1 else ""
     date = parts[2].strip() if len(parts) > 2 else ""
     desc = parts[3].strip() if len(parts) > 3 else ""
+    prio, desc = extract_priority(desc)
     ask, _, outcome = desc.partition(ARROW)
     return {
         "type": kind,
@@ -155,6 +171,7 @@ def parse_qt(kind, num, body, line_no):
         "owner": addressee,
         "status": status,
         "date": date,
+        "priority": prio,
         "ask": ask.strip(),
         "outcome": outcome.strip(),
         "line": line_no + 1,
@@ -274,6 +291,8 @@ def card_html(item, repo_url, plan_path):
     owner_chip = f'<span class="chip owner">{html.escape(owner)}</span>' if owner else ""
     group = item.get("group", "")
     group_chip = f'<span class="chip group">{html.escape(group)}</span>' if group else ""
+    prio = item.get("priority", 0)
+    prio_chip = f'<span class="chip prio p{prio}">P{prio}</span>' if prio else ""
     deep = f'{repo_url}/blob/main/{plan_path}#L{item["line"]}' if repo_url else ""
     deep_link = (
         f'<a class="src" href="{deep}" target="_blank" rel="noopener" '
@@ -290,13 +309,13 @@ def card_html(item, repo_url, plan_path):
     )
     more = '<div class="more"></div>' if (detail or outcome_block) else ""
     haystack = html.escape(
-        f'{item["id"]} {owner} {group} {item["ask"]} {item.get("outcome", "")}'.lower(),
+        f'{item["id"]} {("p"+str(prio)) if prio else ""} {owner} {group} {item["ask"]} {item.get("outcome", "")}'.lower(),
         quote=True,
     )
     return f'''<article class="card s-{item['status']}" data-type="{item['type']}" data-status="{item['status']}" data-owner="{html.escape(owner, quote=True)}" data-search="{haystack}">
   <div class="card-top">
     <span class="id">{item['id']}</span>
-    {owner_chip}{group_chip}
+    {prio_chip}{owner_chip}{group_chip}
     <span class="date">{html.escape(item['date'])}</span>
     {deep_link}
   </div>
@@ -351,8 +370,8 @@ def build_html(questions, tasks, decisions, theme, title, subtitle, repo_url, pl
             + font_links
         )
 
-    # task columns
-    by = lambda st: sorted([t for t in tasks if t["status"] == st], key=lambda x: -x["num"])
+    # task columns (priority first, then most-recent)
+    by = lambda st: sorted([t for t in tasks if t["status"] == st], key=lambda x: (prio_rank(x), -x["num"]))
     t_open, t_prog = by("open"), by("in_progress")
     t_block, t_done = by("blocked"), by("done")
     task_cols = "\n".join([
@@ -371,7 +390,7 @@ def build_html(questions, tasks, decisions, theme, title, subtitle, repo_url, pl
         by_owner.setdefault(q["owner"] or "Unassigned", []).append(q)
     owner_order = sorted(by_owner, key=lambda o: (-len(by_owner[o]), o.lower()))
     q_col_parts = [
-        column(o, "open", sorted(by_owner[o], key=lambda x: -x["num"]), repo_url, plan_path)
+        column(o, "open", sorted(by_owner[o], key=lambda x: (prio_rank(x), -x["num"])), repo_url, plan_path)
         for o in owner_order
     ]
     q_col_parts.append(column("Answered / closed", "answered", q_ans, repo_url, plan_path, collapsed=True))
@@ -511,6 +530,10 @@ main{padding:20px 24px 44px;max-width:1700px;margin:0 auto}
 .card[data-type=Q] .id{background:#dfe6f3}
 .chip{font-size:10.5px;padding:1px 8px;border-radius:999px;border:1px solid var(--border);color:var(--muted);background:var(--paper)}
 .chip.group{border-style:dashed}
+.chip.prio{font-weight:600;letter-spacing:.02em}
+.chip.prio.p1{background:rgba(168,50,50,.12);color:var(--down);border-color:rgba(168,50,50,.35)}
+.chip.prio.p2{background:rgba(201,160,74,.18);color:#8a6d2f;border-color:rgba(201,160,74,.45)}
+.chip.prio.p3{background:var(--paper);color:var(--muted)}
 .date{font-family:var(--f-mono);font-size:10.5px;color:var(--muted);margin-left:auto}
 .src{font-family:var(--f-mono);text-decoration:none;color:var(--muted);font-size:13px;padding:0 2px}
 .src:hover{color:var(--gold)}
@@ -521,7 +544,7 @@ main{padding:20px 24px 44px;max-width:1700px;margin:0 auto}
 .detail li{font-size:12px;color:var(--body);line-height:1.5;margin:0 0 5px}
 .detail li:last-child{margin-bottom:0}
 .more{margin-top:8px;font-size:10px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;color:var(--gold);opacity:.75}
-.more::after{content:"Show details +"}
+.more::after{content:"Details +"}
 .open-card .more::after{content:"Hide -"}
 .outcome{display:none;margin-top:9px;padding:8px 11px;background:rgba(45,122,61,.07);border-radius:6px}
 .open-card .outcome{display:block}
