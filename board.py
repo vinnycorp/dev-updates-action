@@ -56,21 +56,26 @@ GROUP_BOLD = re.compile(r"^\s*\*\*(.+?)\*\*\s*$")
 GROUP_SUB = re.compile(r"^####\s+(?!7\.)(.+?)\s*$")
 
 ARROW = "→"  # the resolution marker used in the tracker rows
-# Optional, backward-compatible priority tag leading a description: [P1] high,
-# [P2] medium, [P3] low. Absent => unprioritized. Stripped from the title.
-PRIORITY = re.compile(r"^\s*\[?[Pp]([123])\]?[.:)\s-]+")
+# Optional priority tag leading a description, flagging a row as "Priority".
+# Single tier: canonical tag is [P]; legacy [P1] is an alias. Legacy [P2]/[P3]
+# (old med/low) are stripped and treated as normal. Stripped from the title.
+PRIORITY = re.compile(r"^\s*\[?(?:P|P1|Priority)\]?[.:)\s-]+", re.I)
+PRIORITY_LOW = re.compile(r"^\s*\[?P[23]\]?[.:)\s-]+", re.I)
 
 
 def extract_priority(desc):
     m = PRIORITY.match(desc)
     if m:
-        return int(m.group(1)), desc[m.end():]
-    return 0, desc
+        return True, desc[m.end():]
+    m = PRIORITY_LOW.match(desc)
+    if m:
+        return False, desc[m.end():]   # legacy [P2]/[P3] -> strip, treat as normal
+    return False, desc
 
 
 def prio_rank(item):
-    # sort order within a column: P1 top, P2, untagged, P3 bottom
-    return {1: 0, 2: 1, 0: 2, 3: 3}.get(item.get("priority", 0), 2)
+    # priority rows float to the top of their column; the rest keep recency order
+    return 0 if item.get("priority") else 1
 
 
 _DATE = re.compile(r"\d{4}-\d{2}-\d{2}")
@@ -362,8 +367,8 @@ def card_html(item, repo_url, plan_path):
     owner_chip = f'<span class="chip owner">{html.escape(owner)}</span>' if owner else ""
     group = item.get("group", "")
     group_chip = f'<span class="chip group">{html.escape(group)}</span>' if group else ""
-    prio = item.get("priority", 0)
-    prio_chip = f'<span class="chip prio p{prio}">P{prio}</span>' if prio else ""
+    prio = item.get("priority", False)
+    prio_chip = '<span class="chip prio">Priority</span>' if prio else ""
     deep = f'{repo_url}/blob/main/{plan_path}#L{item["line"]}' if repo_url else ""
     deep_link = (
         f'<a class="src" href="{deep}" target="_blank" rel="noopener" '
@@ -381,7 +386,7 @@ def card_html(item, repo_url, plan_path):
     bl = backlinks_html(item["id"])
     more = '<div class="more"></div>' if (detail or outcome_block or bl) else ""
     haystack = html.escape(
-        f'{item["id"]} {("p"+str(prio)) if prio else ""} {owner} {group} {item["ask"]} {item.get("outcome", "")}'.lower(),
+        f'{item["id"]} {"priority" if prio else ""} {owner} {group} {item["ask"]} {item.get("outcome", "")}'.lower(),
         quote=True,
     )
     return f'''<article id="item-{item['id']}" class="card s-{item['status']}" data-type="{item['type']}" data-status="{item['status']}" data-owner="{html.escape(owner, quote=True)}" data-search="{haystack}">
@@ -606,10 +611,7 @@ main{padding:20px 24px 44px;max-width:1700px;margin:0 auto}
 .card[data-type=Q] .id{background:#dfe6f3}
 .chip{font-size:10.5px;padding:1px 8px;border-radius:999px;border:1px solid var(--border);color:var(--muted);background:var(--paper)}
 .chip.group{border-style:dashed}
-.chip.prio{font-weight:600;letter-spacing:.02em}
-.chip.prio.p1{background:rgba(168,50,50,.12);color:var(--down);border-color:rgba(168,50,50,.35)}
-.chip.prio.p2{background:rgba(201,160,74,.18);color:#8a6d2f;border-color:rgba(201,160,74,.45)}
-.chip.prio.p3{background:var(--paper);color:var(--muted)}
+.chip.prio{font-weight:600;letter-spacing:.02em;background:var(--gold-bright);color:var(--ink);border-color:var(--gold-bright)}
 .date{font-family:var(--f-mono);font-size:10.5px;color:var(--muted);margin-left:auto}
 .src{font-family:var(--f-mono);text-decoration:none;color:var(--muted);font-size:13px;padding:0 2px}
 .src:hover{color:var(--gold)}
