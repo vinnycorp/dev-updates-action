@@ -56,21 +56,26 @@ GROUP_BOLD = re.compile(r"^\s*\*\*(.+?)\*\*\s*$")
 GROUP_SUB = re.compile(r"^####\s+(?!7\.)(.+?)\s*$")
 
 ARROW = "→"  # the resolution marker used in the tracker rows
-# Optional, backward-compatible priority tag leading a description: [P1] high,
-# [P2] medium, [P3] low. Absent => unprioritized. Stripped from the title.
-PRIORITY = re.compile(r"^\s*\[?[Pp]([123])\]?[.:)\s-]+")
+# Optional priority tag leading a description, flagging a row as "Priority".
+# Single tier: canonical tag is [P]; legacy [P1] is an alias. Legacy [P2]/[P3]
+# (old med/low) are stripped and treated as normal. Stripped from the title.
+PRIORITY = re.compile(r"^\s*\[?(?:P|P1|Priority)\]?[.:)\s-]+", re.I)
+PRIORITY_LOW = re.compile(r"^\s*\[?P[23]\]?[.:)\s-]+", re.I)
 
 
 def extract_priority(desc):
     m = PRIORITY.match(desc)
     if m:
-        return int(m.group(1)), desc[m.end():]
-    return 0, desc
+        return True, desc[m.end():]
+    m = PRIORITY_LOW.match(desc)
+    if m:
+        return False, desc[m.end():]   # legacy [P2]/[P3] -> strip, treat as normal
+    return False, desc
 
 
 def prio_rank(item):
-    # sort order within a column: P1 top, P2, untagged, P3 bottom
-    return {1: 0, 2: 1, 0: 2, 3: 3}.get(item.get("priority", 0), 2)
+    # priority rows float to the top of their column; the rest keep recency order
+    return 0 if item.get("priority") else 1
 
 
 _DATE = re.compile(r"\d{4}-\d{2}-\d{2}")
@@ -362,8 +367,8 @@ def card_html(item, repo_url, plan_path):
     owner_chip = f'<span class="chip owner">{html.escape(owner)}</span>' if owner else ""
     group = item.get("group", "")
     group_chip = f'<span class="chip group">{html.escape(group)}</span>' if group else ""
-    prio = item.get("priority", 0)
-    prio_chip = f'<span class="chip prio p{prio}">P{prio}</span>' if prio else ""
+    prio = item.get("priority", False)
+    prio_chip = '<span class="chip prio">Priority</span>' if prio else ""
     deep = f'{repo_url}/blob/main/{plan_path}#L{item["line"]}' if repo_url else ""
     deep_link = (
         f'<a class="src" href="{deep}" target="_blank" rel="noopener" '
@@ -381,7 +386,7 @@ def card_html(item, repo_url, plan_path):
     bl = backlinks_html(item["id"])
     more = '<div class="more"></div>' if (detail or outcome_block or bl) else ""
     haystack = html.escape(
-        f'{item["id"]} {("p"+str(prio)) if prio else ""} {owner} {group} {item["ask"]} {item.get("outcome", "")}'.lower(),
+        f'{item["id"]} {"priority" if prio else ""} {owner} {group} {item["ask"]} {item.get("outcome", "")}'.lower(),
         quote=True,
     )
     return f'''<article id="item-{item['id']}" class="card s-{item['status']}" data-type="{item['type']}" data-status="{item['status']}" data-owner="{html.escape(owner, quote=True)}" data-search="{haystack}">
@@ -488,7 +493,12 @@ def build_html(questions, tasks, decisions, theme, title, subtitle, repo_url, pl
 
     owners = sorted({t["owner"] for t in tasks if t["owner"]}
                     | {q["owner"] for q in questions if q["owner"]})
-    owner_opts = "\n".join(f'<option value="{html.escape(o, quote=True)}">{html.escape(o)}</option>' for o in owners)
+    # owner filter is a multi-select checkbox menu (pick any number of owners)
+    owner_opts = "\n".join(
+        ['<label class="all"><input type="checkbox" value="__all" checked> All owners</label>']
+        + [f'<label><input type="checkbox" value="{html.escape(o, quote=True)}"> {html.escape(o)}</label>'
+           for o in owners]
+    )
 
     logo = theme.get("logo_svg", "") or f'<span class="wordmark">{html.escape(title)}</span>'
 
@@ -544,8 +554,18 @@ code{font-family:var(--f-mono);font-size:.86em;background:rgba(0,0,0,.05);paddin
 
 /* toolbar */
 .toolbar{position:sticky;top:0;z-index:20;background:var(--paper);border-bottom:1px solid var(--border);padding:12px 24px;display:flex;gap:12px;align-items:center;flex-wrap:wrap}
-.toolbar input[type=search],.toolbar select{font-family:var(--f-sans);font-size:13px;padding:7px 11px;border:1px solid var(--border);border-radius:7px;background:var(--panel);color:var(--ink)}
-.toolbar input[type=search]{min-width:230px}
+.toolbar input[type=search]{font-family:var(--f-sans);font-size:13px;padding:7px 11px;border:1px solid var(--border);border-radius:7px;background:var(--panel);color:var(--ink);min-width:230px}
+/* owner multi-select filter */
+.filter{position:relative}
+.filter-btn{font-family:var(--f-sans);font-size:13px;padding:7px 11px;border:1px solid var(--border);border-radius:7px;background:var(--panel);color:var(--ink);cursor:pointer;display:inline-flex;align-items:center;gap:10px;min-width:150px;justify-content:space-between}
+.filter-btn .caret{color:var(--muted);font-size:10px}
+.filter.open .filter-btn{border-color:var(--gold-bright)}
+.filter-menu{position:absolute;top:calc(100% + 5px);left:0;z-index:40;background:var(--panel);border:1px solid var(--border);border-radius:8px;box-shadow:0 6px 22px rgba(0,0,0,.14);padding:6px;min-width:215px;max-height:330px;overflow:auto}
+.filter-menu[hidden]{display:none}
+.filter-menu label{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--body);padding:5px 8px;border-radius:6px;cursor:pointer;white-space:nowrap}
+.filter-menu label:hover{background:rgba(0,0,0,.04)}
+.filter-menu label.all{border-bottom:1px solid var(--border);border-radius:0;margin-bottom:4px;padding-bottom:8px;font-weight:600;color:var(--ink)}
+.filter-menu input[type=checkbox]{accent-color:var(--gold);width:14px;height:14px}
 .tabs{display:inline-flex;border:1px solid var(--border);border-radius:8px;overflow:hidden;background:var(--panel)}
 .tab{font-family:var(--f-sans);font-size:13px;font-weight:500;padding:8px 17px;border:none;border-right:1px solid var(--border);background:transparent;cursor:pointer;color:var(--muted)}
 .tab:last-child{border-right:none}
@@ -591,10 +611,7 @@ main{padding:20px 24px 44px;max-width:1700px;margin:0 auto}
 .card[data-type=Q] .id{background:#dfe6f3}
 .chip{font-size:10.5px;padding:1px 8px;border-radius:999px;border:1px solid var(--border);color:var(--muted);background:var(--paper)}
 .chip.group{border-style:dashed}
-.chip.prio{font-weight:600;letter-spacing:.02em}
-.chip.prio.p1{background:rgba(168,50,50,.12);color:var(--down);border-color:rgba(168,50,50,.35)}
-.chip.prio.p2{background:rgba(201,160,74,.18);color:#8a6d2f;border-color:rgba(201,160,74,.45)}
-.chip.prio.p3{background:var(--paper);color:var(--muted)}
+.chip.prio{font-weight:600;letter-spacing:.02em;background:var(--gold-bright);color:var(--ink);border-color:var(--gold-bright)}
 .date{font-family:var(--f-mono);font-size:10.5px;color:var(--muted);margin-left:auto}
 .src{font-family:var(--f-mono);text-decoration:none;color:var(--muted);font-size:13px;padding:0 2px}
 .src:hover{color:var(--gold)}
@@ -652,7 +669,10 @@ main{padding:20px 24px 44px;max-width:1700px;margin:0 auto}
     <button class="tab" data-t="D">Decisions <span class="tab-n">%%N_D%%</span></button>
   </div>
   <input type="search" id="q" placeholder="Search...">
-  <select id="owner"><option value="">All owners</option>%%OWNER_OPTS%%</select>
+  <div class="filter" id="ownerFilter">
+    <button type="button" class="filter-btn" id="ownerBtn"><span id="ownerLabel">All owners</span><span class="caret">&#9662;</span></button>
+    <div class="filter-menu" id="ownerMenu" hidden>%%OWNER_OPTS%%</div>
+  </div>
   <div class="spacer"></div>
   <span class="count-live" id="live"></span>
 </div>
@@ -674,13 +694,43 @@ main{padding:20px 24px 44px;max-width:1700px;margin:0 auto}
 
 <script>
 (function(){
-  var q=document.getElementById('q'),owner=document.getElementById('owner'),live=document.getElementById('live');
+  var q=document.getElementById('q'),live=document.getElementById('live');
+  var fWrap=document.getElementById('ownerFilter'),fBtn=document.getElementById('ownerBtn'),
+      fMenu=document.getElementById('ownerMenu'),fLabel=document.getElementById('ownerLabel');
   var active='T';
   var views={T:document.getElementById('view-T'),Q:document.getElementById('view-Q'),D:document.getElementById('view-D')};
+  var sel=new Set();   // selected owners; empty == all
 
-  // cross-reference click -> jump to the referenced card
-  // expand/collapse a card or decision; collapse a column from its header
+  function boxes(){return Array.prototype.slice.call(fMenu.querySelectorAll('input[type=checkbox]'));}
+  function allBox(){return fMenu.querySelector('input[value="__all"]');}
+  function syncLabel(){
+    var n=sel.size;
+    fLabel.textContent = n===0 ? 'All owners' : (n===1 ? Array.from(sel)[0] : n+' owners');
+    var ab=allBox(); if(ab) ab.checked=(n===0);
+  }
+  function clearOwners(){
+    sel.clear();
+    boxes().forEach(function(b){b.checked=(b.value==='__all');});
+    syncLabel();
+  }
+  function openMenu(o){
+    if(o){fMenu.removeAttribute('hidden');fWrap.classList.add('open');}
+    else{fMenu.setAttribute('hidden','');fWrap.classList.remove('open');}
+  }
+
+  // owner multi-select: toggle menu, track selection
+  fBtn.addEventListener('click',function(e){e.stopPropagation();openMenu(fMenu.hasAttribute('hidden'));});
+  fMenu.addEventListener('click',function(e){e.stopPropagation();});
+  fMenu.addEventListener('change',function(e){
+    var cb=e.target;
+    if(cb.value==='__all'){ if(cb.checked){clearOwners();} else {cb.checked=true;} }
+    else { if(cb.checked) sel.add(cb.value); else sel.delete(cb.value); }
+    syncLabel(); apply();
+  });
+
+  // global click: close menu, follow xrefs, expand cards, collapse columns
   document.addEventListener('click',function(e){
+    if(!fWrap.contains(e.target)) openMenu(false);
     var x=e.target.closest('.xref');
     if(x){e.preventDefault();showItem(x.getAttribute('data-ref'));return;}
     var item=e.target.closest('.card,.decision');
@@ -689,18 +739,18 @@ main{padding:20px 24px 44px;max-width:1700px;margin:0 auto}
     if(head){head.parentNode.classList.toggle('collapsed');}
   });
 
+  function setTab(type){
+    active=type;
+    document.querySelectorAll('.tab').forEach(function(t){t.classList.toggle('on',t.getAttribute('data-t')===type);});
+    for(var k in views){views[k].classList.toggle('on',k===type);}
+    fWrap.style.display=(type==='D')?'none':'';   // decisions have no owner
+  }
+
   function showItem(ref){
     var el=document.getElementById('item-'+ref);
     if(!el)return;
-    q.value='';owner.value='';                 // clear filters so the target shows
-    var type=ref.charAt(0);                     // T / Q / D -> tab
-    var tab=document.querySelector('.tab[data-t="'+type+'"]');
-    if(tab){
-      active=type;
-      document.querySelectorAll('.tab').forEach(function(t){t.classList.toggle('on',t===tab);});
-      for(var k in views){views[k].classList.toggle('on',k===type);}
-      owner.style.display=(type==='D')?'none':'';
-    }
+    q.value=''; clearOwners();                  // clear filters so the target shows
+    setTab(ref.charAt(0));                       // T / Q / D -> tab
     apply();
     var col=el.closest('.col');if(col)col.classList.remove('collapsed');
     el.classList.remove('hidden');el.classList.add('open-card');
@@ -713,26 +763,19 @@ main{padding:20px 24px 44px;max-width:1700px;margin:0 auto}
 
   // tabs: single-select, one view visible at a time
   Array.prototype.forEach.call(document.querySelectorAll('.tab'),function(t){
-    t.addEventListener('click',function(){
-      active=t.getAttribute('data-t');
-      document.querySelectorAll('.tab').forEach(function(x){x.classList.toggle('on',x===t);});
-      for(var k in views){views[k].classList.toggle('on',k===active);}
-      owner.style.display=(active==='D')?'none':'';   // decisions have no owner
-      apply();
-    });
+    t.addEventListener('click',function(){setTab(t.getAttribute('data-t'));apply();});
   });
   q.addEventListener('input',apply);
-  owner.addEventListener('change',apply);
 
   function apply(){
     var term=q.value.trim().toLowerCase();
-    var own=owner.value;
     var view=views[active];
+    var useOwner=(sel.size>0 && active!=='D');
     var shown=0;
     view.querySelectorAll('.card,.decision').forEach(function(c){
       var ok=true;
       if(term){ok=(c.getAttribute('data-search')||'').indexOf(term)>=0;}
-      if(ok && own && active!=='D'){ok=(c.getAttribute('data-owner')||'')===own;}
+      if(ok && useOwner){ok=sel.has(c.getAttribute('data-owner')||'');}
       c.classList.toggle('hidden',!ok);
       if(ok)shown++;
     });
@@ -742,6 +785,7 @@ main{padding:20px 24px 44px;max-width:1700px;margin:0 auto}
     });
     live.textContent=shown+' shown';
   }
+  syncLabel();
   apply();
 })();
 </script>
