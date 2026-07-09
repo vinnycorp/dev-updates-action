@@ -348,18 +348,30 @@ STATUS_LABEL = {
 }
 
 
-def detail_bullets(text, title=None):
-    """Prose rendered one <li> per sentence. If `title` already captures the
-    first sentence verbatim (i.e. the title wasn't truncated), drop that first
-    bullet so the heading isn't echoed; otherwise keep everything."""
+def detail_bullets(text, skip_first=False):
+    """Prose rendered one <li> per sentence. Card bodies pass skip_first=True:
+    the first sentence IS the card title (title_html swaps in its full text on
+    expand), so repeating it here would echo the heading. Outcome/answer blocks
+    keep every sentence."""
     sents = split_sentences(text)
-    if title and sents:
-        first = re.sub(r"\s+", " ", _MD_LINK.sub(r"\1", sents[0])).strip().rstrip(" .:;,-")
-        if first == title.rstrip("…").strip():
-            sents = sents[1:]
+    if skip_first:
+        sents = sents[1:]
     if not sents:
         return ""
     return '<ul class="detail">' + "".join(f"<li>{inline_md(s)}</li>" for s in sents) + "</ul>"
+
+
+def title_html(text):
+    """Card heading without echo: collapsed cards show the short derived title
+    (clause-trimmed, char-capped); an open card swaps in the full first
+    sentence, links intact."""
+    sents = split_sentences(text)
+    full_src = re.sub(r"\s+", " ", sents[0] if sents else text).strip().rstrip(" .:;,-")
+    short = make_title(text)
+    if _MD_LINK.sub(r"\1", full_src) == short:
+        return f'<h3 class="card-title">{inline_md(short)}</h3>'
+    return (f'<h3 class="card-title"><span class="t-short">{inline_md(short)}</span>'
+            f'<span class="t-full">{inline_md(full_src)}</span></h3>')
 
 
 def card_html(item, repo_url, plan_path):
@@ -374,9 +386,7 @@ def card_html(item, repo_url, plan_path):
         f'<a class="src" href="{deep}" target="_blank" rel="noopener" '
         f'title="View in plan">{ARROW}</a>' if deep else ""
     )
-    title_text = make_title(item["ask"])
-    title = inline_md(title_text)
-    detail = detail_bullets(item["ask"], title_text)
+    detail = detail_bullets(item["ask"], skip_first=True)
     out_bullets = detail_bullets(item["outcome"]) if item.get("outcome") else ""
     outcome_block = (
         f'<div class="outcome"><span class="outcome-tag">'
@@ -396,7 +406,7 @@ def card_html(item, repo_url, plan_path):
     <span class="date">{html.escape(item['date'])}</span>
     {deep_link}
   </div>
-  <h3 class="card-title">{title}</h3>
+  {title_html(item["ask"])}
   {detail}
   {outcome_block}
   {bl}
@@ -421,15 +431,13 @@ def decision_html(item, repo_url, plan_path):
         f'<a class="src" href="{deep}" target="_blank" rel="noopener" title="View in plan">{ARROW}</a>'
         if deep else ""
     )
-    title_text = make_title(item["ask"])
-    title = inline_md(title_text)
-    detail = detail_bullets(item["ask"], title_text)
+    detail = detail_bullets(item["ask"], skip_first=True)
     bl = backlinks_html(item["id"])
     more = '<div class="more"></div>' if (detail or bl) else ""
     haystack = html.escape(f'{item["id"]} {item["ask"]}'.lower(), quote=True)
     return f'''<article id="item-{item['id']}" class="decision" data-type="D" data-search="{haystack}">
   <div class="d-top"><span class="id">{item['id']}</span><span class="date">{html.escape(item['date'])}</span>{deep_link}</div>
-  <h3 class="card-title">{title}</h3>
+  {title_html(item["ask"])}
   {detail}
   {bl}
   {more}
@@ -621,6 +629,9 @@ main{padding:20px 24px 44px;max-width:1700px;margin:0 auto}
 @keyframes xflash{0%,25%{box-shadow:0 0 0 2px var(--gold),0 4px 16px rgba(0,0,0,.14)}100%{box-shadow:0 0 0 0 rgba(0,0,0,0)}}
 .card-title{margin:0;font-size:13.5px;font-weight:500;color:var(--body);line-height:1.4;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
 .open-card .card-title{-webkit-line-clamp:unset;overflow:visible}
+.card-title .t-full{display:none}
+.open-card .card-title .t-short{display:none}
+.open-card .card-title .t-full{display:inline}
 .detail{display:none;margin:9px 0 0;padding-left:17px}
 .open-card .detail{display:block}
 .detail li{font-size:12px;color:var(--body);line-height:1.5;margin:0 0 5px}

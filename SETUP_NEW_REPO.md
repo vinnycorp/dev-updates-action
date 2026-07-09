@@ -85,6 +85,17 @@ Two optional conventions the board renderer understands:
   ("blocked by Q5", "see D4"). The board auto-links them and builds a
   "Referenced by" backlink on the target card. Never reuse a retired ID.
 
+Two authoring rules that keep the board cards clean:
+
+- **Headline-first**: a row's first sentence becomes its card title
+  (collapsed cards truncate it around 90 chars; opening the card shows it
+  in full). Later sentences become the expanded bullets. Lead with a
+  short, self-sufficient headline and elaborate after.
+- **No arrows in prose**: the first `→` in a row starts the outcome /
+  answer. Never write `→` (or its ASCII alias `->`) as prose inside a
+  description - menu paths ("Settings -> Collaborators") or status flips
+  ("open -> done") get parsed as an outcome split. Use commas or "to".
+
 Seed each table with one or two real rows so the agent contract has
 something concrete to maintain.
 
