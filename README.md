@@ -113,8 +113,11 @@ Configure only the secrets for channels you actually use.
 
 > **Permission note:** creating repo secrets requires **admin** access - a
 > write/push collaborator cannot set them (`gh secret set` fails, and the
-> Settings section is hidden). On client-owned repos, have the owner bump
-> your role to Admin or paste the secrets themselves. The workflow fails
+> Settings section is hidden). On client-owned **org** repos, have the owner
+> bump your role to Admin. On client-owned **personal** repos there is no
+> role picker at all (collaborators get write, full stop) - the owner must
+> either paste the secrets themselves or transfer the repo into a free
+> GitHub organization first (old links auto-redirect). The workflow fails
 > fast with a clear error until they exist, so merging it first is safe.
 
 > **Sharp edge:** secrets pasted from a terminal sometimes carry a trailing `\r\n`, which silently breaks HTTP `Authorization` headers and surfaces as 401s with otherwise-valid keys. The **Sanitize secrets** step in the [Quickstart](#quickstart) workflow strips this — keep that step in your workflow. To sanitize different secrets, edit the `RAW_` env block and the corresponding `$GITHUB_ENV` exports.

@@ -158,11 +158,24 @@ reference for required and optional fields per type.
 > **Permission check first:** creating Actions secrets requires **admin**
 > on the repo — write/push collaborator access is NOT enough (`gh secret
 > set` fails and the Settings page hides the section). This bites on
-> client-owned repos: if the client created the repo and added you as a
-> collaborator, have them bump you to Admin (Settings → Collaborators →
-> Role) or paste the two secrets themselves. Until the secrets exist the
-> workflow fails fast with a clear "CLAUDE_CODE_OAUTH_TOKEN is not set"
-> error, so it is safe to merge the workflow ahead of the secrets.
+> client-owned repos. What to do depends on where the repo lives:
+>
+> - **Organization repo**: the owner bumps your role to Admin
+>   (Settings → Collaborators and teams → Role), then you set the
+>   secrets yourself.
+> - **Personal repo** (client's own account): there is NO role picker —
+>   collaborators on personal repos get write access, full stop, and the
+>   owner will find no option to grant more. Either the owner pastes the
+>   secret values themselves (awkward: the values are usually YOUR
+>   tokens), or — better — the owner creates a free GitHub organization
+>   and transfers the repo into it (Settings → General → Transfer
+>   ownership; old links and remotes auto-redirect), after which the
+>   org-repo path above applies. The org is the right long-term home for
+>   company code anyway.
+>
+> Until the secrets exist the workflow fails fast with a clear
+> "CLAUDE_CODE_OAUTH_TOKEN is not set" error, so it is safe to merge the
+> workflow ahead of the secrets.
 
 In the repo's `Settings → Secrets and variables → Actions`:
 
