@@ -42,7 +42,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 50
+          # Deep enough that the last-notified SHA (stored in a state
+          # artifact) stays in fetch range; on a too-shallow clone the
+          # lookup fallback errors with "Invalid format '0'".
+          fetch-depth: 500
 
       # Sanitize: strip CR/LF and surrounding whitespace from pasted-in
       # tokens before they reach HTTP headers. Secrets pasted from a
@@ -66,6 +69,7 @@ jobs:
       - uses: vinnycorp/dev-updates-action@v1
         with:
           cooldown: '24h'
+          max_turns: '60'   # default 30 runs out on big pushes + a grown plan file
           dev_rules: |
             Audience: the engineering team. Be terse, factual.
             One bullet per meaningful change, leading with what shipped.
@@ -107,6 +111,12 @@ Everything else is upstream-compatible. Existing telegram/discord/slack/twitter 
 
 Configure only the secrets for channels you actually use.
 
+> **Permission note:** creating repo secrets requires **admin** access - a
+> write/push collaborator cannot set them (`gh secret set` fails, and the
+> Settings section is hidden). On client-owned repos, have the owner bump
+> your role to Admin or paste the secrets themselves. The workflow fails
+> fast with a clear error until they exist, so merging it first is safe.
+
 > **Sharp edge:** secrets pasted from a terminal sometimes carry a trailing `\r\n`, which silently breaks HTTP `Authorization` headers and surfaces as 401s with otherwise-valid keys. The **Sanitize secrets** step in the [Quickstart](#quickstart) workflow strips this — keep that step in your workflow. To sanitize different secrets, edit the `RAW_` env block and the corresponding `$GITHUB_ENV` exports.
 
 ## Channel reference
@@ -118,11 +128,11 @@ Channels are inline YAML in the `channels` input. Each entry needs a `type`. Oth
 | Field | Required | Description |
 |---|---|---|
 | `type` | yes | `email` |
-| `to` | yes | Recipients. Inline-array YAML (`["a@x", "b@y"]`) or comma-separated string. |
+| `to` | yes | Recipients. Inline-array YAML (`["a@x", "b@y"]`) or comma-separated string. There is no `cc` field - list every recipient (including yourself) here. |
 | `from` | yes | Sender. Format: `"Name <addr@domain>"`. The domain must be verified in Resend. |
 | `subject_prefix` | no | Prepended to the auto-generated subject. Default: `"[Dev]"`. Use `"[Project]"` style; if the LLM also titles the digest "Project ...", the duplicate is stripped automatically. |
 | `reply_to` | no | Reply-to address. |
-| `preview_url` | no | URL to a live preview/staging site. If set, a link renders ahead of the GitHub link in the email header. Useful for design or website repos. |
+| `preview_url` | no | URL to a live preview/staging site. If set, a link renders ahead of the GitHub link in the email header. Useful for design or website repos. Note: pointing this at a board file in a **private** repo gives readers the HTML *source* (GitHub does not render blob/raw HTML) - host the committed board on a gated static site for a clickable link. |
 | `preview_label` | no | Text for the `preview_url` link. Default: `"View live preview"`. Set e.g. `"View live tracker"` when pointing at a board file rather than a staging site. |
 | `api_key_env` | no | Env var holding the Resend API key. Default: `RESEND_API_KEY`. |
 | `mode` | no | `dev` (default - includes a github-link footer) or `community` (link omitted). |
@@ -336,6 +346,12 @@ Triggers:
 - **`push`** to a tracked branch (typical)
 - **`workflow_dispatch`** for manual runs from the Actions tab
 - **`schedule`** for a cron safety net (e.g. daily at a fixed time)
+
+Turn budget:
+
+- `max_turns` caps the Claude Code turns per digest (default 30). A mature
+  repo's daily cron - large commit range plus a grown plan file - can hit the
+  cap and fail with "Reached max turns"; `max_turns: '60'` is a safe setting.
 
 Cooldown:
 

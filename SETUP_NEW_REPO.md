@@ -67,12 +67,23 @@ formats so the digest parser can read them:
   - Statuses: `open`, `answered`
 - `### 7.2 Action items`
   - Format: `` `T{id} | owner | status | date opened | description (+ outcome inline when done)` ``
-  - Statuses: `open`, `in_progress`, `done`
+  - Statuses: `open`, `in_progress`, `blocked`, `done`. For `blocked`,
+    append the blocker in parentheses: `(blocked by Q{n}/T{n}/external: ...)`.
 - `### 7.3 Decisions log`
   - Format: `` `D{id} | YYYY-MM-DD | decision + rationale` ``
+  - Lead with the why. Reversals get a new D-row referencing the original.
 
 Append-only is the rule. Never delete rows. Flip status in place and
 append the outcome / answer inline after a `→` separator.
+
+Two optional conventions the board renderer understands:
+
+- **Priority tag**: a description may start with `[P]` to flag the row as
+  Priority (single tier - no P1/P2/P3). The board shows a pill and floats
+  those rows to the top of their column. Flag only genuine priorities.
+- **Cross-references**: mention other rows by ID anywhere in the text
+  ("blocked by Q5", "see D4"). The board auto-links them and builds a
+  "Referenced by" backlink on the target card. Never reuse a retired ID.
 
 Seed each table with one or two real rows so the agent contract has
 something concrete to maintain.
@@ -95,16 +106,24 @@ the same rule into its conventions file.
 ### 3. Drop the workflow at `.github/workflows/dev-updates.yml`
 
 Start from the Quickstart in the action's README and customise. Keep
-these defences in place — both have bitten real deployments:
+these defences in place — all have bitten real deployments:
 
 - The **Sanitize secrets** step. Strips `\r\n` and surrounding
   whitespace from pasted-in tokens before they reach HTTP headers.
 - The **cooldown** of `24h` so push triggers and the daily cron don't
   double-fire.
 - The **schedule cron** at a UTC time that's morning local time for
-  the recipient (e.g. `0 20 * * *` = 20:00 UTC = early-morning Asia).
+  the recipient (e.g. `0 20 * * *` = 20:00 UTC = early-morning Asia;
+  `0 5 * * *` = 08:00 Istanbul).
 - The **`workflow_dispatch`** trigger so you can fire manual runs from
   the Actions tab while iterating on `dev_rules`.
+- **`fetch-depth: 500`** on the checkout step. The action looks up the
+  last-notified SHA on the current clone; if that SHA fell out of a
+  shallow fetch, the fallback path errors with `Invalid format '0'` /
+  "Unable to process file command 'output'".
+- **`max_turns: '60'`** on the action step once the repo matures. The
+  default 30-turn budget gets exhausted when a daily cron digests a
+  large commit range plus a grown plan file ("Reached max turns").
 
 Tune the `dev_rules` block for the audience:
 
@@ -124,6 +143,15 @@ Slack, Discord, Telegram, Twitter. See the README's Channel
 reference for required and optional fields per type.
 
 ### 4. Configure GitHub Actions secrets
+
+> **Permission check first:** creating Actions secrets requires **admin**
+> on the repo — write/push collaborator access is NOT enough (`gh secret
+> set` fails and the Settings page hides the section). This bites on
+> client-owned repos: if the client created the repo and added you as a
+> collaborator, have them bump you to Admin (Settings → Collaborators →
+> Role) or paste the two secrets themselves. Until the secrets exist the
+> workflow fails fast with a clear "CLAUDE_CODE_OAUTH_TOKEN is not set"
+> error, so it is safe to merge the workflow ahead of the secrets.
 
 In the repo's `Settings → Secrets and variables → Actions`:
 
@@ -226,6 +254,37 @@ implementation detail. Same workflow, same plan file, different
   `GITHUB_TOKEN` so it never re-triggers the workflow. Grant the job
   `contents: write`. Full input table in the README's "Static board"
   section.
+- **Single-source the board theme.** Keep the theme JSON in
+  `tools/board-theme.json` (usable by a local `board.py` too) and feed it
+  to the action via a load step, instead of pasting a second copy into
+  the workflow:
+
+  ```yaml
+  - name: Load board theme
+    id: theme
+    shell: bash
+    run: |
+      { echo 'json<<__BOARD_THEME_EOF__'; cat tools/board-theme.json; echo '__BOARD_THEME_EOF__'; } >> "$GITHUB_OUTPUT"
+  # then: dashboard_theme: ${{ steps.theme.outputs.json }}
+  ```
+- **Board-only mode (no digest).** Some engagements want the tracker
+  board without pushed emails (e.g. pre-kickoff, or a privacy-sensitive
+  client). Vendor `board.py` + a `board-theme.json` into the repo's
+  `tools/` and regenerate locally on each tracker edit (`python
+  tools/board.py --watch`); adopt the plan-file + agent-contract layers
+  as normal. The row grammar is identical, so upgrading later to the
+  full action (digest + CI board commit-back) is just dropping in the
+  workflow - the ORO and Crypto Haro repos are reference instances of
+  this path (Crypto Haro later upgraded to the full workflow).
+- **Sharing the board from a private repo.** A GitHub blob/raw URL shows
+  the board's HTML *source*, not the rendered page - fine as a download
+  link for repo collaborators, but not a clickable board. For a real
+  URL, host the committed file (private-friendly static host, e.g. a
+  gated Vercel/Cloudflare Pages site - the Auctus board lives behind
+  Cloudflare Access at lab.auctusmetals.com/board) and point the email
+  channel's `preview_url` at it.
+- **Extra digest recipients.** The email channel has no `cc` field -
+  just add every recipient (including yourself) to the `to` array.
 
 ## Updating the digest behaviour later
 
