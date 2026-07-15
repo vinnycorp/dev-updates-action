@@ -199,6 +199,14 @@ Both have bitten real deployments:
   looks valid in the workflow log but the upstream API returns a 401
   or 403 with an opaque error. The Sanitize-secrets step in the
   Quickstart workflow strips this before use.
+- **Never pipe a secret into `gh secret set` from PowerShell 5.1.**
+  The pipe prepends an invisible UTF-8 BOM to the value; email dispatch
+  then fails with `'latin-1' codec can't encode character '\ufeff' in
+  position 7` (position 7 = right after `Bearer `). Use
+  `gh secret set NAME -b <value>` (argument, not stdin). The Quickstart
+  Sanitize step also strips BOMs as a second line of defence. Since the
+  bad value is invisible and secret values are shown once, recovery
+  usually means re-minting the key.
 
 ### Verify
 

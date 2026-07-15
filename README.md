@@ -59,8 +59,10 @@ jobs:
           RAW_OAUTH: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           RAW_SLACK: ${{ secrets.SLACK_WEBHOOK_URL }}
         run: |
-          CLEAN_OAUTH="$(printf '%s' "$RAW_OAUTH" | tr -d '\r\n' | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
-          CLEAN_SLACK="$(printf '%s' "$RAW_SLACK" | tr -d '\r\n' | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+          # sed strips UTF-8 BOMs (\xef\xbb\xbf): PowerShell 5.1 pipes prepend
+          # one to `gh secret set` stdin, corrupting Authorization headers.
+          CLEAN_OAUTH="$(printf '%s' "$RAW_OAUTH" | sed -e 's/\xef\xbb\xbf//g' | tr -d '\r\n' | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+          CLEAN_SLACK="$(printf '%s' "$RAW_SLACK" | sed -e 's/\xef\xbb\xbf//g' | tr -d '\r\n' | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
           echo "::add-mask::$CLEAN_OAUTH"
           echo "::add-mask::$CLEAN_SLACK"
           echo "CLAUDE_CODE_OAUTH_TOKEN=$CLEAN_OAUTH" >> "$GITHUB_ENV"
@@ -120,7 +122,7 @@ Configure only the secrets for channels you actually use.
 > GitHub organization first (old links auto-redirect). The workflow fails
 > fast with a clear error until they exist, so merging it first is safe.
 
-> **Sharp edge:** secrets pasted from a terminal sometimes carry a trailing `\r\n`, which silently breaks HTTP `Authorization` headers and surfaces as 401s with otherwise-valid keys. The **Sanitize secrets** step in the [Quickstart](#quickstart) workflow strips this — keep that step in your workflow. To sanitize different secrets, edit the `RAW_` env block and the corresponding `$GITHUB_ENV` exports.
+> **Sharp edge:** secrets pasted from a terminal sometimes carry a trailing `\r\n`, which silently breaks HTTP `Authorization` headers and surfaces as 401s with otherwise-valid keys. A nastier variant: **piping a value into `gh secret set` from PowerShell 5.1 prepends an invisible UTF-8 BOM** (`﻿`) to the secret — dispatch then dies with `'latin-1' codec can't encode character '\ufeff' in position 7` (position 7 = right after `Bearer `). Set secrets with `gh secret set NAME -b <value>` instead of piping. The **Sanitize secrets** step in the [Quickstart](#quickstart) workflow strips both CR/LF and BOMs — keep that step in your workflow. To sanitize different secrets, edit the `RAW_` env block and the corresponding `$GITHUB_ENV` exports.
 
 ## Channel reference
 
