@@ -303,6 +303,16 @@ Board inputs:
 | `dashboard_commit` | `true` | Set false to generate without committing (e.g. to upload as an artifact yourself). |
 | `dashboard_commit_message` | `chore(board): refresh engagement board [skip ci]` | |
 
+### Duplicate ids
+
+A plan file has no registry handing out ids, so two people - or two agent sessions - working the tracker at once both compute "highest + 1" and mint the same number. The rows then collide everywhere downstream: the board keys cards by id, a cross-reference like "see T200" becomes ambiguous, and "is T200 done?" stops having one answer.
+
+The generator reports duplicates two ways: an `::error::` annotation per id in the Actions log, naming the line numbers, and a banner at the top of the board linking to each offending line.
+
+It does **not** fail the run. This generator also produces the digest, so exiting non-zero over a numbering slip would silence a repo's updates - and duplicates already exist in live plan files, so a hard failure would break them the moment the tag moved. The banner reaches the person who can renumber the row; a red workflow mostly reaches nobody.
+
+To fix: renumber the newer row to the next free number and update any cross-references pointing at it.
+
 Parsing is forgiving by design: rows are classified by their `Q`/`T`/`D` id prefix regardless of which sub-heading they sit under (a misfiled row still lands in the right lane), and a row whose trailing backtick is missing is still parsed rather than dropped. Run it locally to preview:
 
 ```bash

@@ -445,7 +445,49 @@ def decision_html(item, repo_url, plan_path):
 
 
 # --- HTML assembly ----------------------------------------------------------
-def build_html(questions, tasks, decisions, theme, title, subtitle, repo_url, plan_path, as_of):
+def find_duplicate_ids(items):
+    """Ids that appear on more than one row, mapped to the lines they sit on.
+
+    A plan file has no registry handing out ids, so two people - or two agent
+    sessions - working the tracker at the same time both compute "highest + 1"
+    and mint the same number. The rows then collide everywhere downstream: the
+    board keys cards by id, cross-references like "see T200" become ambiguous,
+    and asking "is T200 done?" stops having one answer.
+
+    Reported, never fatal. Duplicates already exist in live plan files, and
+    this generator also produces the digest, so failing the run would silence
+    a repo's updates over a numbering slip. A loud board banner reaches the
+    person who can fix it; a red workflow mostly reaches nobody.
+    """
+    seen = {}
+    for it in items:
+        seen.setdefault(it["id"], []).append(it.get("line"))
+    return {k: v for k, v in sorted(seen.items()) if len(v) > 1}
+
+
+def duplicate_banner(dupes, repo_url, plan_path):
+    if not dupes:
+        return ""
+    parts = []
+    for rid, lines in dupes.items():
+        nums = [n for n in lines if n]
+        if repo_url and nums:
+            where = ", ".join(
+                f'<a href="{repo_url}/blob/main/{plan_path}#L{n}">line {n}</a>' for n in nums
+            )
+        else:
+            where = ", ".join(f"line {n}" for n in nums) or "unknown lines"
+        parts.append(f"<b>{html.escape(rid)}</b> ({where})")
+    return (
+        '<div class="dupe-warn"><b>Duplicate ids in the plan.</b> '
+        + "; ".join(parts)
+        + '. Each id must appear once - renumber the newer row to the next free '
+        + 'number and fix any cross-references pointing at it.</div>'
+    )
+
+
+def build_html(questions, tasks, decisions, theme, title, subtitle, repo_url, plan_path, as_of,
+               dupes=None):
     global _VALID_IDS, _BACKLINKS
     _VALID_IDS = {x["id"] for x in (questions + tasks + decisions)}
     _BACKLINKS = build_backlinks(questions + tasks + decisions)
@@ -511,6 +553,7 @@ def build_html(questions, tasks, decisions, theme, title, subtitle, repo_url, pl
     logo = theme.get("logo_svg", "") or f'<span class="wordmark">{html.escape(title)}</span>'
 
     return TEMPLATE \
+        .replace("%%DUPE_WARN%%", duplicate_banner(dupes or {}, repo_url, plan_path)) \
         .replace("%%TITLE%%", html.escape(title)) \
         .replace("%%SUBTITLE%%", html.escape(subtitle or "")) \
         .replace("%%FONT_LINKS%%", font_links) \
@@ -657,6 +700,9 @@ main{padding:20px 24px 44px;max-width:1700px;margin:0 auto}
 .d-top .id{background:var(--gold-pale)}
 .hidden{display:none!important}
 
+.dupe-warn{margin:0 auto;max-width:1600px;padding:10px 14px;border:1px solid var(--down);border-left-width:3px;border-radius:3px;background:color-mix(in srgb, var(--down) 7%, var(--panel));color:var(--body);font-size:13px;line-height:1.55}
+.dupe-warn b{color:var(--down)}
+.dupe-warn a{color:var(--down);text-decoration:underline}
 @media(max-width:1100px){.board{grid-template-columns:repeat(2,1fr)}}
 @media(max-width:680px){.board,.board.q{grid-template-columns:1fr}.top .meta{margin-left:0;width:100%}}
 </style>
@@ -672,6 +718,7 @@ main{padding:20px 24px 44px;max-width:1700px;margin:0 auto}
     </div>
   </div>
 </header>
+%%DUPE_WARN%%
 
 <div class="toolbar">
   <div class="tabs">
@@ -825,10 +872,20 @@ def main():
     if not (questions or tasks or decisions):
         print("::warning::No tracker rows parsed - check the section headings and row format.", file=sys.stderr)
 
+    # Surfaced in the Actions log AND on the board itself. The log entry is for
+    # whoever is watching the run; the banner is for whoever reads the board,
+    # which in practice is the person who can renumber the row.
+    dupes = find_duplicate_ids(questions + tasks + decisions)
+    for rid, lines in dupes.items():
+        where = ", ".join(str(n) for n in lines if n) or "unknown lines"
+        print(f"::error file={plan_path}::Duplicate id {rid} on lines {where} - "
+              f"each id must appear once. Renumber the newer row.", file=sys.stderr)
+
     as_of = args.as_of.strip() or date.today().isoformat()
-    htmlout = build_html(questions, tasks, decisions, theme, args.title, args.subtitle, args.repo_url, plan_path, as_of)
+    htmlout = build_html(questions, tasks, decisions, theme, args.title, args.subtitle, args.repo_url, plan_path, as_of, dupes)
     Path(args.out).write_text(htmlout, encoding="utf-8")
-    print(f"Board written to {args.out}: {len(tasks)} tasks, {len(questions)} questions, {len(decisions)} decisions.")
+    dupe_note = f", {len(dupes)} DUPLICATE ID(S): {', '.join(dupes)}" if dupes else ""
+    print(f"Board written to {args.out}: {len(tasks)} tasks, {len(questions)} questions, {len(decisions)} decisions{dupe_note}.")
 
 
 if __name__ == "__main__":
