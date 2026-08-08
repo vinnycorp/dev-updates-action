@@ -40,6 +40,10 @@ inputs:
     description: 'Maximum Claude Code conversation turns when generating a summary. Bump if your dev_rules require reading large files (e.g. growing tracker docs).'
     required: false
     default: '30'
+  digest_theme:
+    description: 'JSON string of brand colours for the digest email. Accepts the same shape as dashboard_theme, so a client can pass one board-theme.json to both and keep a single source of truth for its palette. Empty (default) renders the original gold/cream palette unchanged. Status chips stay semantic unless overridden via a "status" block.'
+    required: false
+    default: ''
   dashboard:
     description: 'Generate a static kanban board HTML from the plan tracker tables (true/false). Deterministic - no LLM, no API cost.'
     required: false
@@ -286,6 +290,7 @@ runs:
         REPO: ${{ github.repository }}
         COMMITS: ${{ steps.range.outputs.commit_count }}
         FILES: ${{ steps.range.outputs.files_changed }}
+        DIGEST_THEME: ${{ inputs.digest_theme }}
       run: |
         uv run --with telegramify-markdown --with tweepy python3 ${{ github.action_path }}/dispatch.py
         echo "dispatched=true" >> "$GITHUB_OUTPUT"

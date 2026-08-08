@@ -98,6 +98,7 @@ Compared to the upstream `alphakek-ai/dev-updates-action`:
 6. **Auto subject de-doubling** - if your `subject_prefix` is `[Project]` and the LLM titles the digest "Project Dev Updates ...", the leading "Project" is stripped from the title so the subject only carries the bracket once.
 7. **`preview_url` field** on the email channel - if you point this at a staging/preview URL, a "View live preview" link renders in the email header bar (useful for design or marketing repos that ship to a Vercel/Netlify preview).
 8. **Static kanban board** - an optional, deterministic (no-LLM) render of the plan's Section 7 tracker tables into a single self-contained, themeable HTML file, committed back to the repo on every run. See [Static board](#static-board) below.
+9. **Per-client digest branding** - `digest_theme` themes the email to a client's design system, accepting the same JSON as `dashboard_theme` so one palette file drives both surfaces. See [Brand colours](#brand-colours-digest_theme) below.
 
 Everything else is upstream-compatible. Existing telegram/discord/slack/twitter configs continue to work unchanged.
 
@@ -240,6 +241,70 @@ single Blocked pill, not two - the inline rule drops its own chip when the line
 already carries one and renders just the "waiting on X" caption.
 
 This lines up with a common `dev_rules` convention: have the LLM emit `✅ Shipped: T15 - description` for completed items and append `(in progress)` or `(waiting on Person)` to in-flight items - or, for task-list sections, lead each bullet with its status word.
+
+#### Brand colours (`digest_theme`)
+
+By default the digest renders in the fork's gold-on-cream palette. A client repo
+with its own design system can pass its palette as `digest_theme` and the email
+chrome - links, headings, rules, header bar, metric cards, sparkline - follows it.
+
+`digest_theme` accepts **the same JSON shape as `dashboard_theme`**, so a repo
+that already themes its board can point both at one file and keep a single source
+of truth for its brand:
+
+```yaml
+- name: Load brand theme
+  id: theme
+  shell: bash
+  run: |
+    { echo 'json<<__THEME_EOF__'; cat tools/board-theme.json; echo '__THEME_EOF__'; } >> "$GITHUB_OUTPUT"
+
+- uses: vinnycorp/dev-updates-action@v1
+  with:
+    dashboard_theme: ${{ steps.theme.outputs.json }}
+    digest_theme:    ${{ steps.theme.outputs.json }}   # same palette, both surfaces
+```
+
+The board's colour vocabulary maps onto email roles as follows. Any key you omit
+keeps its default, so a partial theme is fine:
+
+| Board key | Email role | Used for |
+|---|---|---|
+| `gold` | `accent` | links, metric values, most recent sparkline bar |
+| `gold_bright` | `accent_soft` | earlier sparkline bars |
+| `gold_pale` | `surface_alt` | sparkline panel background |
+| `paper` | `surface` | header bar, metric cards |
+| `ink` | `ink` | headings |
+| `body` | `body` | body copy |
+| `muted` | `muted` | captions, footer, metric labels |
+| `border` | `border` | rules, card and header borders |
+
+`rule` (the `|` separators in the header bar) has no board equivalent, so it
+inherits `border` when a theme is supplied. `code_bg` is neutral grey and only
+changes if you set it. You can also set any email role name directly - a direct
+key beats the board alias, letting you tune the digest without touching the board:
+
+```yaml
+digest_theme: |
+  { "colors": { "gold": "#000584", "accent_soft": "#00a8e1", "rule": "#dbe4f0" } }
+```
+
+**Status chips stay semantic.** Applying a brand palette does *not* recolour the
+Done/Blocked/New chips - a brand-blue "Blocked" chip loses the meaning the chip
+exists to carry. Override them explicitly only if your palette genuinely collides:
+
+```yaml
+digest_theme: |
+  { "status": { "blocked": { "bg": "#2b0f14", "fg": "#ffb4b4", "label": "Stuck" } } }
+```
+
+Omitted fields in a `status` entry keep their defaults. A malformed `digest_theme`
+logs a workflow warning and falls back to the default palette rather than failing
+the run - a plain-looking digest beats no digest.
+
+> Leaving `digest_theme` unset renders exactly what the action rendered before
+> this input existed, byte for byte. Existing deployments are unaffected until
+> they opt in.
 
 #### Email styling notes (Gmail tuned)
 
