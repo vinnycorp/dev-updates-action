@@ -94,7 +94,7 @@ Compared to the upstream `alphakek-ai/dev-updates-action`:
 2. **Gmail-tuned HTML renderer** for digest emails. Tight margins, no `<br><br>` voids between blocks, brand-coloured links, monospace code spans.
 3. **Optional metric strip** - if you set `DIGEST_METRIC_DONE`, `DIGEST_METRIC_OPEN`, `DIGEST_METRIC_QUESTIONS` env vars in a workflow step before the action runs, a 3-up dashboard card row renders at the top of the email.
 4. **Optional activity sparkline** - if you set `DIGEST_SPARKLINE` to a comma-separated list of recent daily commit counts, an inline SVG bar chart renders next to the metric strip.
-5. **Auto-status pills** in the email - lines containing `(in progress)`, `(waiting on ...)`, or a `✅ Shipped:` prefix are auto-styled as colored chips so the digest scans like a status board.
+5. **Auto-status pills** in the email - lines containing `(in progress)`, `(waiting on ...)`, or a `✅ Shipped:` prefix are auto-styled as colored chips, as are list items that *lead* with a bare `NEW` / `UPDATED` / `DONE` / `IN PROGRESS` / `BLOCKED` token. The digest scans like a status board.
 6. **Auto subject de-doubling** - if your `subject_prefix` is `[Project]` and the LLM titles the digest "Project Dev Updates ...", the leading "Project" is stripped from the title so the subject only carries the bracket once.
 7. **`preview_url` field** on the email channel - if you point this at a staging/preview URL, a "View live preview" link renders in the email header bar (useful for design or marketing repos that ship to a Vercel/Netlify preview).
 8. **Static kanban board** - an optional, deterministic (no-LLM) render of the plan's Section 7 tracker tables into a single self-contained, themeable HTML file, committed back to the repo on every run. See [Static board](#static-board) below.
@@ -204,11 +204,42 @@ The bars render in inline SVG (~560x36px), with the most recent day in primary g
 
 **Status pills - inline colored chips.** No env var needed. The renderer scans the rendered HTML and replaces:
 
+*Inline markers, anywhere in a line:*
+
 - `✅ Shipped:` -> green DONE pill
 - `(in progress)` -> amber IN PROGRESS pill
 - `(waiting on X)` -> red BLOCKED pill plus "waiting on X" caption
 
-This lines up with a common `dev_rules` convention: have the LLM emit `✅ Shipped: T15 - description` for completed items and append `(in progress)` or `(waiting on Person)` to in-flight items.
+*Leading tokens, at the start of a list item:*
+
+A bullet that opens with a bare status word followed by a dash has that word
+replaced by a pill. Useful for task-list sections where every line carries a
+status:
+
+| Leading token | Pill |
+|---|---|
+| `NEW` | blue New |
+| `UPDATED` | stone Updated |
+| `DONE` | green Done |
+| `IN PROGRESS` | amber In Progress |
+| `BLOCKED` | red Blocked |
+
+```text
+- DONE - T199: Generator hooked into the daily refresh.
+- **NEW** - T200: Drafted the exact list of missing data.
+- BLOCKED — T178: Needs a funded account.
+```
+
+Matching is case-insensitive, tolerates the token being bolded (`**NEW**`), and
+accepts a hyphen, en dash, or em dash as the separator - the summary is
+model-written and doesn't always pick the same one. Bullets with no leading
+status token are left alone.
+
+A bullet that both leads with `BLOCKED` **and** contains `(waiting on X)` gets a
+single Blocked pill, not two - the inline rule drops its own chip when the line
+already carries one and renders just the "waiting on X" caption.
+
+This lines up with a common `dev_rules` convention: have the LLM emit `✅ Shipped: T15 - description` for completed items and append `(in progress)` or `(waiting on Person)` to in-flight items - or, for task-list sections, lead each bullet with its status word.
 
 #### Email styling notes (Gmail tuned)
 
@@ -418,14 +449,31 @@ python3 dispatch.py
 uses: vinnycorp/dev-updates-action@<commit-sha>
 ```
 
-Re-tagging `v1` after a backward-compatible change:
+Re-tagging `v1` after a backward-compatible change - move it in one atomic
+force-push, from a checkout whose `HEAD` is the commit you want consumers to
+get:
 
 ```bash
-git tag -d v1
-git push origin :refs/tags/v1
-git tag v1
-git push origin v1
+git tag -f -a v1 -m "v1 - what changed" && git push origin v1 --force
 ```
+
+Two reasons not to delete-then-recreate the tag (`git push origin :refs/tags/v1`
+followed by a fresh push): between the two commands `@v1` resolves to nothing, so
+any consumer whose workflow starts in that window fails outright - and this
+action is pinned at `@v1` across every downstream repo. A force-push swaps the
+ref in place with no such gap. Deleting also loses the annotation: `git tag v1`
+creates a *lightweight* tag, while `v1` here is annotated, so the recreated tag
+is a different kind of object than the one it replaced.
+
+Merging to `main` alone ships nothing - consumers pin `@v1`, so the tag move is
+the step that actually releases. Verify it landed on the intended commit:
+
+```bash
+git ls-remote origin refs/tags/v1
+```
+
+The second line of that output (`refs/tags/v1^{}`) is the commit the tag
+dereferences to; it should equal `origin/main`.
 
 ## Contributing
 
@@ -433,7 +481,7 @@ PRs welcome. Bug fixes for the email renderer or new channel types are especiall
 
 ## License
 
-MIT, inheriting the upstream license.
+Apache-2.0, inheriting the upstream license. See [LICENSE](./LICENSE).
 
 ## Credits
 
