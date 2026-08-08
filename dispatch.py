@@ -287,7 +287,50 @@ def _markdown_to_html(md):
     )
     out = re.sub(r"✅ Shipped:\s*", pill_done, out)
     out = re.sub(r"\(in progress\)", pill_in_progress, out, flags=re.IGNORECASE)
-    out = re.sub(r"\(waiting on ([^)]+)\)", pill_blocked + r' <span style="color:#6b6359;">waiting on \1</span>', out)
+
+    # Leading status tokens on task-list bullets ("NEW - T202: ...") render as bare
+    # text otherwise. The <li\b[^>]*> anchor is deliberately loose: pinning it to the
+    # literal style attribute emitted above would silently stop chipping the moment
+    # that markup changes by a character. The separator class covers hyphen/en dash/
+    # em dash because the summary is model-written and varies.
+    _status_style = {
+        "DONE": ("Done", "#e2efe5", "#1f5b2c"),
+        "IN PROGRESS": ("In Progress", "#f5e9c8", "#7e5a17"),
+        "BLOCKED": ("Blocked", "#f4d4d4", "#7e1f1f"),
+        "NEW": ("New", "#dfe7f2", "#2a4a72"),
+        "UPDATED": ("Updated", "#e8e2d4", "#5c5348"),
+    }
+
+    def _lead_chip(m):
+        label, bg, fg = _status_style[m.group(2).upper()]
+        chip = (
+            f'<span style="display:inline-block;padding:1px 7px;margin-right:6px;'
+            f'border-radius:3px;background:{bg};color:{fg};font-size:11px;'
+            f'font-weight:600;letter-spacing:0.04em;text-transform:uppercase;">{label}</span>'
+        )
+        return m.group(1) + chip
+
+    out = re.sub(
+        r"(<li\b[^>]*>)\s*(?:<strong>)?\s*"
+        r"(NEW|IN PROGRESS|DONE|BLOCKED|UPDATED)(?:</strong>)?\s*[-–—]\s+",
+        _lead_chip,
+        out,
+        flags=re.IGNORECASE,
+    )
+
+    def _waiting_on(m):
+        # Each <li> occupies its own line here, so the line prefix is the right scope
+        # to ask "does this bullet already carry a Blocked chip?". If it does (the
+        # bullet led with a BLOCKED token), emit only the grey annotation rather than
+        # a second identical pill. Lines with no leading Blocked chip are unchanged.
+        s = m.string
+        line_start = s.rfind("\n", 0, m.start()) + 1
+        grey = f'<span style="color:#6b6359;">waiting on {m.group(1)}</span>'
+        if "background:#f4d4d4" in s[line_start:m.start()]:
+            return grey
+        return pill_blocked + " " + grey
+
+    out = re.sub(r"\(waiting on ([^)]+)\)", _waiting_on, out)
     return out
 
 
