@@ -90,23 +90,32 @@ runs:
       run: |
         mkdir -p /tmp/state
 
-        # Find the latest successful run of this workflow (exclude current run)
+        # WALK BACK UNTIL WE FIND STATE, rather than reading only the newest
+        # successful run. A run uploads the state artifact only when it skipped
+        # or dispatched - one that failed to dispatch (max turns, a bad plan
+        # file, an API error) can still finish "success" carrying no artifact.
+        # Reading a single run meant one such run wiped the chain: state came
+        # back empty, the cooldown below fell open, and the next push emailed.
         CURRENT_RUN_ID="${{ github.run_id }}"
         WORKFLOW_NAME="${{ github.workflow }}"
-        RUN_ID=$(gh run list --repo "$REPO" --workflow "$WORKFLOW_NAME" --status success --limit 5 --json databaseId \
-          --jq "[.[] | select(.databaseId != ${CURRENT_RUN_ID})][0].databaseId" 2>/dev/null || echo "")
+        RUN_IDS=$(gh run list --repo "$REPO" --workflow "$WORKFLOW_NAME" --status success --limit 20 --json databaseId --jq "[.[] | select(.databaseId != ${CURRENT_RUN_ID})] | .[].databaseId" 2>/dev/null || echo "")
 
-        if [[ -z "$RUN_ID" || "$RUN_ID" == "null" ]]; then
+        if [[ -z "$RUN_IDS" ]]; then
           echo "::notice::No previous successful run found."
           exit 0
         fi
 
-        # Find the artifact in that run
-        ARTIFACT_URL=$(gh api "repos/$REPO/actions/runs/$RUN_ID/artifacts" \
-          --jq '.artifacts[] | select(.name=="dev-updates-state") | .archive_download_url' 2>/dev/null || echo "")
+        RUN_ID=""
+        ARTIFACT_URL=""
+        for CANDIDATE in $RUN_IDS; do
+          URL=$(gh api "repos/$REPO/actions/runs/$CANDIDATE/artifacts" --jq '.artifacts[] | select(.name=="dev-updates-state") | .archive_download_url' 2>/dev/null || echo "")
+          if [[ -n "$URL" && "$URL" != "null" ]]; then
+            RUN_ID="$CANDIDATE"; ARTIFACT_URL="$URL"; break
+          fi
+        done
 
-        if [[ -z "$ARTIFACT_URL" || "$ARTIFACT_URL" == "null" ]]; then
-          echo "::notice::Previous run had no state artifact."
+        if [[ -z "$ARTIFACT_URL" ]]; then
+          echo "::notice::No state artifact on any of the last 20 successful runs."
           exit 0
         fi
 
@@ -156,6 +165,19 @@ runs:
           NOW=$(date +%s)
 
           # On push: check cooldown
+          # THE COOLDOWN FAILS CLOSED ON PUSH. This used to be conditional on
+          # "$LAST_AT" != "0", so a missing state DISABLED the cooldown and the
+          # push emailed - backwards for a noise control, and what turned one
+          # stateless run into a burst of digests. With no state we do not know
+          # when we last sent, so the safe answer is not to send; the scheduled
+          # run establishes state and carries the commits.
+          if [[ "$EVENT_NAME" == "push" && "$LAST_AT" == "0" ]]; then
+            echo "::warning::No previous state on a push - skipping. The scheduled run will establish it."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "state_missing=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
           if [[ "$EVENT_NAME" == "push" && "$LAST_AT" != "0" ]]; then
             ELAPSED=$(( NOW - LAST_AT ))
             if (( ELAPSED < COOLDOWN_SECONDS )); then
@@ -353,8 +375,11 @@ runs:
 
     # --- Save state for next run ---
     # Forward previous state when skipped (cooldown), save new state only when dispatch succeeded
+    # state_missing guards the empty case: skipping BECAUSE there was no
+    # state must not write an empty state, or the chain never recovers and
+    # every push skips forever.
     - name: Save state
-      if: inputs.cooldown != '' && (steps.range.outputs.skip == 'true' || steps.dispatch.outputs.dispatched == 'true')
+      if: inputs.cooldown != '' && steps.range.outputs.state_missing != 'true' && (steps.range.outputs.skip == 'true' || steps.dispatch.outputs.dispatched == 'true')
       shell: bash
       run: |
         mkdir -p /tmp/state
@@ -375,7 +400,7 @@ runs:
         fi
 
     - name: Upload state artifact
-      if: inputs.cooldown != '' && (steps.range.outputs.skip == 'true' || steps.dispatch.outputs.dispatched == 'true')
+      if: inputs.cooldown != '' && steps.range.outputs.state_missing != 'true' && (steps.range.outputs.skip == 'true' || steps.dispatch.outputs.dispatched == 'true')
       uses: actions/upload-artifact@v4
       with:
         name: dev-updates-state
