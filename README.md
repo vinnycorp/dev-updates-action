@@ -26,11 +26,9 @@ Good fits include shipping changelogs, internal dev updates, weekly digests for 
 name: Dev Updates
 
 on:
-  push:
-    branches: [main]
   workflow_dispatch:
   schedule:
-    - cron: '0 20 * * *'   # daily safety net at 20:00 UTC
+    - cron: '0 20 * * *'   # daily digest at 20:00 UTC
 
 jobs:
   notify:
@@ -83,6 +81,18 @@ jobs:
         # a step-level `env:` block here - it would override the
         # cleaned values with the raw secrets.
 ```
+
+> **Cron, not push.** Earlier versions of this quickstart also fired on every
+> push to `main`. On a busy day that is a run every few minutes, and each run
+> reads the previous run's state artifact to decide whether the cooldown has
+> expired - so a run that starts before the previous one has uploaded its state
+> falls back to sending. The result is several digests an hour, each covering a
+> range that keeps growing. A daily cron covers the same commits with none of
+> that. Add `push:` back only if you want a per-commit feed and are content for
+> the cooldown to be raced.
+>
+> If the workflow also regenerates a dashboard, it now does so daily rather
+> than per push - `workflow_dispatch` is the manual refresh.
 
 That's it. Push to `main` and a Slack message lands describing what changed.
 
