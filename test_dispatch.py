@@ -1,9 +1,13 @@
-"""Tests for dispatch.py — channel parsing, summary loading, email theming."""
+"""Tests for dispatch.py — channel parsing, summary loading, email theming,
+Telegram formatting."""
 
 import json
 import os
 import re
 
+import pytest
+
+import dispatch as dispatch_module
 from dispatch import (
     _markdown_to_html,
     _normalize_mode,
@@ -121,7 +125,7 @@ class TestLoadSummary:
         assert load_summary("nonexistent_mode_xyz") == ""
 
     def test_loads_content(self):
-        with open("/tmp/summary_testmode.md", "w") as f:
+        with open("/tmp/summary_testmode.md", "w", encoding="utf-8") as f:
             f.write("📦 **My Update**\n\n🔧 Fixed a bug\n🚀 Added a feature")
 
         content = load_summary("testmode")
@@ -131,7 +135,7 @@ class TestLoadSummary:
         os.unlink("/tmp/summary_testmode.md")
 
     def test_strips_whitespace(self):
-        with open("/tmp/summary_striptest.md", "w") as f:
+        with open("/tmp/summary_striptest.md", "w", encoding="utf-8") as f:
             f.write("  \n  content here  \n  ")
 
         content = load_summary("striptest")
@@ -239,3 +243,77 @@ class TestEmailTheme:
         t = load_email_theme(json.dumps({"colors": {"gold": r"#fff\1"}}))
         html = _markdown_to_html("- \u2705 Shipped: T1 - a\n", t)
         assert 'uppercase;">DONE</span>' in html
+
+
+class TestTelegramFooter:
+    """The footer must sit under a blank line, whatever the body ends with.
+
+    Regression: body and footer used to be markdownified as ONE document, and the
+    Markdown -> MarkdownV2 pass folds a blank line away when the text before it
+    ends in a list. Dev digests almost always end in a list, so the repo link
+    rendered glued to the last bullet \u2014 while a digest ending in a prose paragraph
+    looked fine, which is what made the bug look intermittent.
+    """
+
+    def _send_and_capture(self, monkeypatch, content, mode="dev"):
+        captured = {}
+
+        def fake_urlopen(req, *a, **kw):
+            captured["payload"] = json.loads(req.data.decode())
+
+            class R:
+                def __enter__(self):
+                    return self
+
+                def __exit__(self, *exc):
+                    return False
+
+            return R()
+
+        monkeypatch.setattr(dispatch_module.urllib.request, "urlopen", fake_urlopen)
+        monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "test-token")
+        dispatch_module.send_telegram(
+            {"chat_id": "123", "mode": mode},
+            content,
+            "alphakek-ai/aesoteric-kb",
+            "aesoteric-kb",
+            1,
+            1,
+        )
+        return captured["payload"]["text"]
+
+    @pytest.mark.parametrize(
+        "body",
+        [
+            "**Dev update**\n\n- first bullet\n- last bullet",
+            "**Dev update**\n\n* first bullet\n* last bullet",
+            "**Dev update**\n\n\u2022 first bullet\n\u2022 last bullet",
+            "**Dev update**\n\nJust a closing paragraph.",
+            "**Dev update**\n\n1. first\n2. last",
+            "**Dev update**\n\n- outer\n  - nested last",
+        ],
+        ids=["dash-list", "star-list", "bullet-char", "paragraph", "ordered", "nested"],
+    )
+    def test_blank_line_before_footer(self, monkeypatch, body):
+        text = self._send_and_capture(monkeypatch, body)
+        # Match the footer's opening bracket, not the bare word \u2014 "aesoteric"
+        # also occurs inside the trailing github.com URL.
+        assert "\n\n[aesoteric" in text, (
+            f"footer not preceded by a blank line; tail was {text[-90:]!r}"
+        )
+
+    def test_community_mode_also_spaced(self, monkeypatch):
+        text = self._send_and_capture(
+            monkeypatch, "**Dev update**\n\n- only bullet", mode="community"
+        )
+        assert "\n\naesoteric" in text, f"tail was {text[-90:]!r}"
+
+    def test_long_body_keeps_the_footer(self, monkeypatch):
+        """Truncation must eat the body, never the link."""
+        body = "**Dev update**\n\n" + "\n".join(f"- bullet {i}" for i in range(900))
+        text = self._send_and_capture(monkeypatch, body)
+        assert len(text) <= dispatch_module.TELEGRAM_LIMIT
+        assert "github.com/alphakek-ai/aesoteric-kb" in text, "repo link was truncated away"
+        assert "\u2026" in text, "no ellipsis marking the cut"
+        body_part = text[: text.rfind("\n\n")]
+        assert not body_part.endswith("\\"), "ends on a dangling MarkdownV2 escape"

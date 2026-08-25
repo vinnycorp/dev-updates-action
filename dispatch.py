@@ -53,9 +53,13 @@ def parse_channels(yaml_text: str) -> list[dict]:
 def load_summary(mode: str) -> str:
     path = f"/tmp/summary_{mode}.md"
     try:
-        return open(path).read().strip()
+        # Digests carry emoji; never inherit the platform default codec.
+        return open(path, encoding="utf-8").read().strip()
     except FileNotFoundError:
         return ""
+
+
+TELEGRAM_LIMIT = 4000  # Telegram's cap is 4096; leave headroom for entities
 
 
 def send_telegram(ch, content, repo, repo_name, commits, files):
@@ -74,11 +78,27 @@ def send_telegram(ch, content, repo, repo_name, commits, files):
         footer = f"{repo_name} - {commits} commit(s) - {files} file(s)"
     else:
         footer = f"[{repo_name} - {commits} commit(s) - {files} file(s)](https://github.com/{repo})"
-    md_text = f"{content}\n\n{footer}"
-    text = markdownify(md_text)
+    # Convert body and footer SEPARATELY, then join.
+    #
+    # Passing them as one document lets the Markdown -> MarkdownV2 pass fold the
+    # blank line away whenever the body ends in a list - which a dev digest almost
+    # always does - so the footer renders glued to the last bullet. A body ending
+    # in a plain paragraph keeps its blank line, which is why this looked correct
+    # in some digests and not others. Converting the halves independently means
+    # the list and the footer are never in one document to be merged.
+    body = markdownify(content).rstrip("\n")
+    foot = markdownify(footer).rstrip("\n")
 
-    if len(text) > 4000:
-        text = text[:3997] + "..."
+    # Trim the body, never the footer: the footer carries the repo link, and the
+    # previous code truncated the joined string, so a long digest silently lost
+    # it. The old "..." was also three unescaped dots, which MarkdownV2 rejects.
+    budget = TELEGRAM_LIMIT - len(foot) - 2  # 2 = the blank-line join
+    if len(body) > budget:
+        body = body[: max(0, budget - 1)]
+        body = body.rstrip("\\")  # never end on a dangling escape - Telegram 400s
+        body += "…"  # ellipsis is not a MarkdownV2 special, needs no escape
+
+    text = f"{body}\n\n{foot}"
 
     payload = {
         "chat_id": chat_id,
