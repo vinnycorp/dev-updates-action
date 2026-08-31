@@ -6,6 +6,17 @@ Supported channels: **Telegram**, **Discord**, **Slack**, **Twitter**, **Email**
 
 This is a fork of [alphakek-ai/dev-updates-action](https://github.com/alphakek-ai/dev-updates-action) maintained by [@vinnycorp](https://github.com/vinnycorp). See [What's different in this fork](#whats-different-in-this-fork) below.
 
+## Role and boundaries
+
+This action is a **downstream renderer and notifier**. A consuming repository owns its
+plan file and project state. The action reads that plan plus Git history, then produces
+digests, boards, and notifications. It does not own or autonomously maintain the plan.
+
+In the wider system, Hermes may propose plan and KB updates, the content engine consumes
+a selected client KB, and this action projects current state for people. Reusable setup
+procedures belong in `playbooks`. See the canonical
+[`system-architecture.md`](https://github.com/vinnycorp/playbooks/blob/main/docs/system-architecture.md).
+
 ## Why use it
 
 Most dev-update tooling is either too noisy (raw commit lists) or too heavy (project-management dashboards nobody opens). This action sits in the middle:
