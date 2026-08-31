@@ -17,6 +17,28 @@ a selected client KB, and this action projects current state for people. Reusabl
 procedures belong in `playbooks`. See the canonical
 [`system-architecture.md`](https://github.com/vinnycorp/playbooks/blob/main/docs/system-architecture.md).
 
+```text
+team chat + authoritative repos
+             |
+             v
+        hermes-ops
+             |
+             | proposes PRs
+             v
+        human review
+             |
+             | merges
+             v
+          client KB
+            /    \
+           v      v
+ content-engine  dev-updates-action  <- this repo
+ drafts content  digest + optional board
+```
+
+`playbooks` supplies reusable setup methods around this flow. This action begins only
+after authoritative state has landed in the client KB.
+
 ## Why use it
 
 Most dev-update tooling is either too noisy (raw commit lists) or too heavy (project-management dashboards nobody opens). This action sits in the middle:
