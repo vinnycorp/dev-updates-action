@@ -74,6 +74,7 @@ def test_layout_typos_and_link_changes_are_not_substantive():
     assert not substantive('[Roadmap](https://old)', '[Roadmap](https://new)')
     assert not substantive('Fix teh form', 'Fix the form')
     assert substantive('Budget is $5000', 'Budget is $6000')
+    assert not substantive('Plan unchanged\nLast updated: 2026-10-26', 'Plan unchanged\nLast updated: 2026-10-27')
 
 
 def test_document_edits_and_navigation_filter():

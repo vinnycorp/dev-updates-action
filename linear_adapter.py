@@ -47,6 +47,7 @@ def write_json(path, value):
 def words(value):
     # Link destinations, layout and metadata alone do not constitute product news.
     value = re.sub(r'\[([^]]+)\]\([^)]*\)', r'\1', value or '')
+    value = re.sub(r'^\s*[*#_ ]*(?:last updated|updated at|updated|revision|document id|source sha-?256|imported at)\s*[*_ ]*:[^\n]*$', '', value, flags=re.I | re.M)
     return re.findall(r'[\w%$]+', value.lower())
 
 
@@ -162,6 +163,8 @@ def evaluate(snapshot, config, previous=None):
                 reasons.append('blocker raised' if 'block' in target.get('name', '').lower() else 'blocker cleared')
             if target and source != target and target.get('type') in ('started', 'completed', 'canceled'):
                 reasons.append('state: '+target['name'])
+                if 'decision' in labels and target.get('type') == 'completed':
+                    reasons.append('adopted decision')
             if event.get('toPriority') in (1, 2) and event.get('fromPriority') != event['toPriority']:
                 reasons.append('priority raised to urgent/high')
             active = issue.get('state', {}).get('type') == 'started' or issue.get('priority') in (1, 2)
