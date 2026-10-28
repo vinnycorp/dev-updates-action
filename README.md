@@ -181,10 +181,17 @@ Channels are inline YAML in the `channels` input. Each entry needs a `type`. Oth
 | `from` | yes | Sender. Format: `"Name <addr@domain>"`. The domain must be verified in Resend. |
 | `subject_prefix` | no | Prepended to the auto-generated subject. Default: `"[Dev]"`. Use `"[Project]"` style; if the LLM also titles the digest "Project ...", the duplicate is stripped automatically. |
 | `reply_to` | no | Reply-to address. |
+| `project_name` | no | Display name for header links, preserving project capitalization. Defaults to the bracketed `subject_prefix` name (except generic `[Dev]`), then the repository name. |
 | `preview_url` | no | URL to a live preview/staging site. If set, a link renders ahead of the GitHub link in the email header. Useful for design or website repos. Note: pointing this at a board file in a **private** repo gives readers the HTML *source* (GitHub does not render blob/raw HTML) - host the committed board on a gated static site for a clickable link. |
-| `preview_label` | no | Text for the `preview_url` link. Default: `"View live preview"`. Set e.g. `"View live tracker"` when pointing at a board file rather than a staging site. |
+| `preview_label` | no | Text for the `preview_url` link. Defaults to `View {project_name} Linear` for a Linear URL, otherwise `View live preview`. |
 | `api_key_env` | no | Env var holding the Resend API key. Default: `RESEND_API_KEY`. |
 | `mode` | no | `dev` (default - includes a github-link footer) or `community` (link omitted). |
+
+The HTML header and plain-text alternative share this order, with dynamic Git counts:
+`View Auctus Linear | View Auctus GitHub | 9 commit(s) in this push | 9 file(s) changed`.
+Other clients use their own display name. The Linear link is navigation only:
+the action has no built-in authenticated Linear reader. Report tracker updates only
+when a separate integration has verified access and supplied current evidence.
 
 Example:
 
@@ -195,6 +202,9 @@ Example:
   to: ["alice@example.com", "bob@example.com"]
   from: "Updates <updates@yourdomain.com>"
   subject_prefix: "[ProjectName]"
+  project_name: "ProjectName"
+  preview_url: "https://linear.app/your-workspace/team/TEAM/overview"
+  preview_label: "View ProjectName Linear"
   reply_to: "alice@example.com"
   preview_url: "https://your-app.vercel.app"
 ```

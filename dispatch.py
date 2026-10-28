@@ -20,6 +20,7 @@ import json
 import os
 import re
 import sys
+from html import escape
 import urllib.error
 import urllib.request
 
@@ -570,12 +571,21 @@ def send_email(ch, content, repo, repo_name, commits, files):
 
     html_body = _markdown_to_html(content, theme)
 
+    project_name = ch.get("project_name") or (
+        prefix_match.group(1).strip()
+        if prefix_match and prefix_match.group(1).strip() != "Dev"
+        else repo_name
+    )
+    github_label = f"View {project_name} GitHub"
     preview_url = ch.get("preview_url", "")
-    preview_label = ch.get("preview_label", "View live preview")
+    preview_label = ch.get("preview_label") or (
+        f"View {project_name} Linear"
+        if preview_url.startswith("https://linear.app/") else "View live preview"
+    )
     preview_anchor = (
         f'<a href="{preview_url}" style="color:{c["accent"]};text-decoration:none;font-weight:600;">'
-        f'{preview_label}</a>'
-        f'<span style="margin:0 8px;color:{c["rule"]};">|</span>'
+        f'{escape(preview_label)}</a>'
+        f'<span style="margin:0 8px;color:{c["rule"]};"> | </span>'
     ) if preview_url else ""
     header_html = (
         f'<div style="background:{c["surface"]};border:1px solid {c["border"]};border-radius:6px;'
@@ -583,10 +593,10 @@ def send_email(ch, content, repo, repo_name, commits, files):
         f'color:{c["muted"]};font-family:system-ui,sans-serif;">'
         f'{preview_anchor}'
         f'<a href="https://github.com/{repo}" style="color:{c["accent"]};text-decoration:none;font-weight:600;">'
-        f'View {repo_name} on GitHub</a>'
-        f'<span style="margin:0 8px;color:{c["rule"]};">|</span>'
+        f'{escape(github_label)}</a>'
+        f'<span style="margin:0 8px;color:{c["rule"]};"> | </span>'
         f'{commits} commit(s) in this push'
-        f'<span style="margin:0 8px;color:{c["rule"]};">|</span>'
+        f'<span style="margin:0 8px;color:{c["rule"]};"> | </span>'
         f'{files} file(s) changed'
         f'</div>'
     )
@@ -609,12 +619,17 @@ def send_email(ch, content, repo, repo_name, commits, files):
         f'{header_html}{metric_strip_html}{html_body}{footer_html}</div>'
     )
 
+    header_text = " | ".join(
+        ([preview_label] if preview_url else [])
+        + [github_label, f"{commits} commit(s) in this push", f"{files} file(s) changed"]
+    )
+    source_links = (f"{preview_label}: {preview_url}\n" if preview_url else "") + f"{github_label}: https://github.com/{repo}"
     payload = {
         "from": sender,
         "to": to_list,
         "subject": subject,
         "html": html,
-        "text": content + f"\n\n{repo_name} - {commits} commit(s) - {files} file(s)\nhttps://github.com/{repo}",
+        "text": f"{header_text}\n\n{content}\n\n{source_links}",
     }
     if reply_to := ch.get("reply_to"):
         payload["reply_to"] = reply_to

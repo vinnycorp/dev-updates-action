@@ -153,6 +153,14 @@ Tune the `channels` block for the delivery target. Pick from email,
 Slack, Discord, Telegram, Twitter. See the README's Channel
 reference for required and optional fields per type.
 
+For email digests, use `project_name` for the correctly capitalized client name.
+For a Linear-backed project, set `preview_url` to its real team/project URL and
+`preview_label` to `View {Project} Linear`. The shared renderer produces
+`View {Project} Linear | View {Project} GitHub | {commits} commit(s) in this push | {files} file(s) changed`.
+Counts come from the actual Git range, never a copied example. Omit the Linear
+link for projects without Linear. A configured link is navigation, not proof of
+authenticated tracker reads; do not claim Linear updates without verified access.
+
 ### 4. Configure GitHub Actions secrets
 
 > **Permission check first:** creating Actions secrets requires **admin**
