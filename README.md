@@ -609,6 +609,10 @@ dereferences to; it should equal `origin/main`.
 
 ## Contributing
 
+For authenticated tracker evidence, Linear-only activity, filtering and safe
+preview mode, see [Linear adapter](LINEAR.md). This is opt-in through
+`linear_config`; existing Git-only consumers retain their source boundaries.
+
 PRs welcome. Bug fixes for the email renderer or new channel types are especially appreciated. Keep `dispatch.py` dependency-free where practical (stdlib `urllib` over `requests`); the action runs in a `uv run` environment that doesn't pre-install third-party packages, and the email channel uses only stdlib intentionally.
 
 ## License
