@@ -4,6 +4,20 @@ A GitHub Action that turns every push into a written summary and dispatches it t
 
 Supported channels: **Telegram**, **Discord**, **Slack**, **Twitter**, **Email**.
 
+## Test CI in a fork
+
+GitHub disables workflow execution when a repository is forked, independently of
+the API's per-workflow `active` state. Open the repository's Actions tab and clear
+the fork activation notice before expecting push or pull-request tests to run.
+Review and disable notification workflows before enabling a fork if delivery is
+not intended. In this fork, Self Report and the Claude messaging workflows remain
+disabled; Tests is enabled.
+
+The `Tests` workflow supports push to main, pull requests and manual dispatch.
+Run `gh workflow run test.yml --repo vinnycorp/dev-updates-action --ref main` for
+test-only verification. It runs pytest with read-only repository permissions and
+no delivery secrets. Do not dispatch Self Report or a consumer digest to test CI.
+
 This is a fork of [alphakek-ai/dev-updates-action](https://github.com/alphakek-ai/dev-updates-action) maintained by [@vinnycorp](https://github.com/vinnycorp). See [What's different in this fork](#whats-different-in-this-fork) below.
 
 ## Role and boundaries
