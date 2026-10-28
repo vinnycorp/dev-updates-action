@@ -19,4 +19,4 @@ jobs:
       - uses: astral-sh/setup-uv@v6
 
       - name: Run tests
-        run: uv run --with pytest --with telegramify-markdown --with tweepy pytest test_dispatch.py -v
+        run: uv run --with pytest --with pyyaml --with telegramify-markdown --with tweepy pytest test_dispatch.py test_linear_adapter.py test_action.py -v
